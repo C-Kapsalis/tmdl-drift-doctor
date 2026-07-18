@@ -7,11 +7,15 @@ minutes.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.10+ (the CLI runs on Windows, macOS and Linux alike).
 - Nothing else — the repository ships a runnable example fleet under
   `examples/fleet/` (a fictional gym chain), and this tutorial uses it.
+- *Optional:* Power BI Desktop (Windows-only) if you want to open the models
+  and see the drift visually — see
+  [examples/README.md](../../examples/README.md#open-the-models-in-power-bi-desktop-see-the-drift-with-your-own-eyes).
 
-Install the package from a checkout of this repository:
+Install the package from a checkout of this repository (identical in every
+shell):
 
 ```console
 $ pip install .
@@ -23,17 +27,31 @@ $ drift-doctor --version
 Running the tool writes state and fixes models in place, so copy the example
 fleet somewhere writable and keep the shipped one pristine:
 
-```console
-$ cp -r examples/fleet ~/gym-fleet
-$ cd ~/gym-fleet
+```bash
+# bash / macOS / Linux
+cp -r examples/fleet /tmp/gym-fleet
+cd /tmp/gym-fleet
 ```
 
-The layout is one template model and two derived ("franchise") models:
+```powershell
+# PowerShell / Windows
+Copy-Item -Recurse examples\fleet $env:TEMP\gym-fleet
+Set-Location $env:TEMP\gym-fleet
+```
+
+Every `drift-doctor` command below is byte-identical in both shells — only the
+copy step above differs.
+
+The layout is one template model and two derived ("franchise") models, each
+wrapped as a Power BI Desktop project (`GymChain.pbip`) you can open directly:
 
 ```
 fleet.yml
+template/GymChain.pbip                       # open in Power BI Desktop
 template/GymChain.SemanticModel/definition/...
+derived/alpha/GymChain.pbip
 derived/alpha/GymChain.SemanticModel/definition/...
+derived/bravo/GymChain.pbip
 derived/bravo/GymChain.SemanticModel/definition/...
 ```
 
@@ -182,7 +200,10 @@ $ drift-doctor ledger
 
 - [examples/README.md](../../examples/README.md) — "act two" of this same
   fleet: retire a measure from the template, cascade the removal with
-  `--sync`, and revive it on one franchise.
+  `--sync`, and revive it on one franchise. It also has an
+  [open-in-Power-BI-Desktop loop](../../examples/README.md#open-the-models-in-power-bi-desktop-see-the-drift-with-your-own-eyes)
+  so you can watch a drifted measure change before and after remediation
+  (Windows + Power BI Desktop).
 - [Cascade a column retirement](../how-to/cascade-a-column-retirement.md) —
   the removal side of the workflow, step by step.
 - [Run drift-doctor in CI](../how-to/run-in-ci.md) — make drift a build signal.

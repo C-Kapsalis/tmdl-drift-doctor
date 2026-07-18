@@ -47,10 +47,22 @@ somewhere writable and point the CLI at it
 ([examples/README.md](examples/README.md) has the guided walkthrough,
 retirement and revival included):
 
-```console
-$ pip install -e .
-$ cp -r examples/fleet ~/gym-fleet && cd ~/gym-fleet
+```bash
+# bash / macOS / Linux
+pip install -e .
+cp -r examples/fleet /tmp/gym-fleet && cd /tmp/gym-fleet
+```
 
+```powershell
+# PowerShell / Windows
+pip install -e .
+Copy-Item -Recurse examples\fleet $env:TEMP\gym-fleet ; Set-Location $env:TEMP\gym-fleet
+```
+
+The `drift-doctor` commands themselves are identical in every shell — only the
+copy step above differs between bash and PowerShell:
+
+```console
 $ drift-doctor capture
 baseline written: .drift-doctor/baseline.json
   tables=5 columns=16 measures=8 mapping_rows=4 expressions=2

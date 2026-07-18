@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "SemanticModel",
+    "displayName": "GymChain — Franchise Bravo"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "33333333-3333-4333-8333-333333333331"
+  }
+}
