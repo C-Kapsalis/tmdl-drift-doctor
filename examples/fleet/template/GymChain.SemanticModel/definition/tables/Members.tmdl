@@ -1,0 +1,54 @@
+table Members
+	lineageTag: 11111111-1111-4111-8111-000000000001
+
+	column MemberId
+		dataType: int64
+		lineageTag: 11111111-1111-4111-8111-000000000002
+		summarizeBy: none
+		sourceColumn: MemberId
+
+		annotation SummarizationSetBy = Automatic
+
+	column JoinDate
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: 11111111-1111-4111-8111-000000000003
+		summarizeBy: none
+		sourceColumn: JoinDate
+
+	column MembershipTier
+		dataType: string
+		lineageTag: 11111111-1111-4111-8111-000000000004
+		summarizeBy: none
+		sourceColumn: MembershipTier
+
+	measure 'Active Members' = DISTINCTCOUNT(Members[MemberId])
+		formatString: #,0
+		lineageTag: 11111111-1111-4111-8111-000000000005
+
+	/// New joiners inside the reporting window.
+	measure 'New Members #' =
+
+			VAR _start = DATE(2024, 1, 1)
+			RETURN
+			    CALCULATE(
+			        DISTINCTCOUNT(Members[MemberId]),
+			        Members[JoinDate] >= _start
+			    )
+		formatString: #,0
+		lineageTag: 11111111-1111-4111-8111-000000000006
+
+	measure '_Member Base' = COUNTROWS(Members)
+		isHidden
+		lineageTag: 11111111-1111-4111-8111-000000000007
+
+	partition Members = m
+		mode: import
+		source =
+				let
+				    Source = FranchiseWarehouse,
+				    members = Source{[Name = "members"]}[Data]
+				in
+				    members
+
+	annotation PBI_ResultType = Table

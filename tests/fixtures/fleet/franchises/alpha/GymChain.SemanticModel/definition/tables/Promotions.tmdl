@@ -1,0 +1,36 @@
+table Promotions
+	lineageTag: 44444444-4444-4444-8444-000000000001
+
+	column PromoId
+		dataType: int64
+		lineageTag: 44444444-4444-4444-8444-000000000002
+		summarizeBy: none
+		sourceColumn: PromoId
+
+	column PromoName
+		dataType: string
+		lineageTag: 44444444-4444-4444-8444-000000000003
+		summarizeBy: none
+		sourceColumn: PromoName
+
+	column StartDate
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: 44444444-4444-4444-8444-000000000004
+		summarizeBy: none
+		sourceColumn: StartDate
+
+	measure 'Active Promotions' = COUNTROWS(Promotions)
+		formatString: #,0
+		lineageTag: 44444444-4444-4444-8444-000000000005
+
+	partition Promotions = m
+		mode: import
+		source =
+				let
+				    Source = FranchiseWarehouse,
+				    promos = Source{[Name = "promotions"]}[Data]
+				in
+				    promos
+
+	annotation PBI_ResultType = Table

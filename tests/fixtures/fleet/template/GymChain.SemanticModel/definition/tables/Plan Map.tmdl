@@ -1,0 +1,37 @@
+table 'Plan Map'
+	lineageTag: 55555555-5555-4555-8555-000000000001
+
+	column PlanKey
+		dataType: string
+		lineageTag: 55555555-5555-4555-8555-000000000002
+		summarizeBy: none
+		sourceColumn: PlanKey
+
+	column PlanName
+		dataType: string
+		lineageTag: 55555555-5555-4555-8555-000000000003
+		summarizeBy: none
+		sourceColumn: PlanName
+
+	column MonthlyFee
+		dataType: int64
+		lineageTag: 55555555-5555-4555-8555-000000000004
+		summarizeBy: none
+		sourceColumn: MonthlyFee
+
+	partition 'Plan Map' = calculated
+		mode: import
+		source =
+				DATATABLE(
+				    "PlanKey", STRING,
+				    "PlanName", STRING,
+				    "MonthlyFee", INTEGER,
+				    {
+				        {"basic", "Basic", 29},
+				        {"plus", "Plus", 49},
+				        {"elite", "Elite", 89},
+				        {"legacy-gold", "Legacy Gold", 119}
+				    }
+				)
+
+	annotation PBI_ResultType = Table

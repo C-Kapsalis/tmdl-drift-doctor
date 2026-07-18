@@ -1,0 +1,26 @@
+# Fixture fleet: a gym chain. One template model, two franchise models with
+# seeded drift of every kind the suite detects.
+version: 1
+template: template/GymChain.SemanticModel
+models:
+  alpha: franchises/alpha/GymChain.SemanticModel
+  bravo: franchises/bravo/GymChain.SemanticModel
+mapping_tables:
+  - Plan Map
+state_dir: .drift-doctor
+allowlist:
+  kinds:
+    - table.missing
+    - column.missing
+    - column.property_drift
+    - measure.missing
+    - measure.expression_drift
+    - measure.property_drift
+    - expression.drift
+    - mapping_row.missing
+    - retire.table
+    - retire.column
+    - retire.measure
+    - retire.mapping_row
+  expressions:
+    - Reporting Start Date

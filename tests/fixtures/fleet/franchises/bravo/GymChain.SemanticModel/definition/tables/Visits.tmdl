@@ -1,0 +1,57 @@
+table Visits
+	lineageTag: 22222222-2222-4222-8222-000000000001
+
+	column VisitKey
+		dataType: string
+		lineageTag: 22222222-2222-4222-8222-000000000002
+		summarizeBy: none
+		sourceColumn: VisitKey
+
+	column MemberId
+		dataType: int64
+		lineageTag: 22222222-2222-4222-8222-000000000003
+		summarizeBy: none
+		sourceColumn: MemberId
+
+	column VisitDate
+		dataType: dateTime
+		formatString: yyyy-mm-dd hh:nn
+		lineageTag: 22222222-2222-4222-8222-000000000004
+		summarizeBy: none
+		sourceColumn: VisitDate
+
+	column DurationMinutes
+		dataType: int64
+		lineageTag: 22222222-2222-4222-8222-000000000005
+		summarizeBy: sum
+		sourceColumn: DurationMinutes
+
+	measure 'Total Visits' = COUNTROWS(Visits)
+		formatString: #,0
+		lineageTag: 22222222-2222-4222-8222-000000000006
+
+	measure 'Avg Visit Duration' =
+
+			AVERAGE(Visits[DurationMinutes])
+		formatString: 0.0
+		lineageTag: 22222222-2222-4222-8222-000000000007
+
+	measure 'Peak Hour Visits' = ```
+			CALCULATE(
+			    COUNTROWS(Visits),
+			    HOUR(Visits[VisitDate]) IN {17, 18, 19}
+			)
+			```
+		formatString: #,0
+		lineageTag: 22222222-2222-4222-8222-000000000008
+
+	partition Visits = m
+		mode: import
+		source =
+				let
+				    Source = FranchiseWarehouse,
+				    visits = Source{[Name = "visits"]}[Data]
+				in
+				    visits
+
+	annotation PBI_ResultType = Table

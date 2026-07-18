@@ -1,0 +1,33 @@
+# Example fleet: a fictional gym chain. One template ("golden") model and two
+# franchise models, with drift of every major kind pre-seeded so the tutorial
+# has something real to find. All paths are relative to this file — run the
+# CLI from this directory (examples/fleet/).
+version: 1
+template: template/GymChain.SemanticModel
+models:
+  alpha: derived/alpha/GymChain.SemanticModel
+  bravo: derived/bravo/GymChain.SemanticModel
+
+mapping_tables:          # tables whose DATATABLE rows are diffed row-by-row
+  - Plan Map
+
+state_dir: .drift-doctor # baseline.json + ledger.jsonl land here
+
+# Starter allowlist: every NON-DESTRUCTIVE kind is permitted, so a plain
+# `remediate` can insert and overwrite. Retirement (the only deletions) stays
+# double-gated: `retire.measure` is listed for the tutorial's act two, but a
+# removal still requires --sync at run time; the other retire.* kinds are not
+# named at all and can never be applied here.
+allowlist:
+  kinds:
+    - table.missing
+    - column.missing
+    - column.property_drift
+    - measure.missing
+    - measure.expression_drift
+    - measure.property_drift
+    - expression.drift
+    - mapping_row.missing
+    - retire.measure       # deletions additionally require --sync at run time
+  expressions:
+    - Reporting Start Date # ONLY named expressions are ever compared

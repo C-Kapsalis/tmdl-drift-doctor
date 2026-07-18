@@ -1,0 +1,9 @@
+expression 'Reporting Start Date' = #date(2023, 6, 1) meta [IsParameterQuery = true, Type = "Date", IsParameterQueryRequired = true]
+	lineageTag: aaaa6666-6666-4666-8666-000000000001
+
+	annotation PBI_ResultType = Date
+
+expression 'Data Source' = "alpha-warehouse" meta [IsParameterQuery = true, Type = "Text", IsParameterQueryRequired = true]
+	lineageTag: aaaa6666-6666-4666-8666-000000000002
+
+	annotation PBI_ResultType = Text

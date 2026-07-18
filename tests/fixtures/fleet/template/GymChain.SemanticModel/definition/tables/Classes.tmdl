@@ -1,0 +1,35 @@
+table Classes
+	lineageTag: 33333333-3333-4333-8333-000000000001
+
+	column ClassId
+		dataType: int64
+		lineageTag: 33333333-3333-4333-8333-000000000002
+		summarizeBy: none
+		sourceColumn: ClassId
+
+	column ClassName
+		dataType: string
+		lineageTag: 33333333-3333-4333-8333-000000000003
+		summarizeBy: none
+		sourceColumn: ClassName
+
+	column Capacity
+		dataType: int64
+		lineageTag: 33333333-3333-4333-8333-000000000004
+		summarizeBy: sum
+		sourceColumn: Capacity
+
+	measure 'Class Fill Rate %' = DIVIDE(COUNTROWS(Visits), SUM(Classes[Capacity]))
+		formatString: 0.0%
+		lineageTag: 33333333-3333-4333-8333-000000000005
+
+	partition Classes = m
+		mode: import
+		source =
+				let
+				    Source = FranchiseWarehouse,
+				    classes = Source{[Name = "classes"]}[Data]
+				in
+				    classes
+
+	annotation PBI_ResultType = Table

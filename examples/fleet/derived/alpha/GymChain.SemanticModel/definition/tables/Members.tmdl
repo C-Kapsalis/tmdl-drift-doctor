@@ -1,0 +1,47 @@
+table Members
+	lineageTag: aaaa1111-1111-4111-8111-000000000001
+
+	column MemberId
+		dataType: int64
+		lineageTag: aaaa1111-1111-4111-8111-000000000002
+		summarizeBy: none
+		sourceColumn: MemberId
+
+		annotation SummarizationSetBy = Automatic
+
+	column JoinDate
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: aaaa1111-1111-4111-8111-000000000003
+		summarizeBy: none
+		sourceColumn: JoinDate
+
+	column MembershipTier
+		dataType: string
+		lineageTag: aaaa1111-1111-4111-8111-000000000004
+		summarizeBy: none
+		sourceColumn: MembershipTier
+
+	measure 'Active Members' = DISTINCTCOUNT(Members[MemberId])
+		formatString: #,0
+		lineageTag: aaaa1111-1111-4111-8111-000000000005
+
+	measure '_Member Base' = COUNTROWS(Members)
+		isHidden
+		lineageTag: aaaa1111-1111-4111-8111-000000000007
+
+	/// Alpha's own loyalty KPI — a legitimate franchise extension.
+	measure 'Alpha Loyalty Score' = DIVIDE([Active Members], COUNTROWS(Members))
+		formatString: 0.00
+		lineageTag: aaaa1111-1111-4111-8111-000000000008
+
+	partition Members = m
+		mode: import
+		source =
+				let
+				    Source = FranchiseWarehouse,
+				    members = Source{[Name = "members"]}[Data]
+				in
+				    members
+
+	annotation PBI_ResultType = Table
