@@ -446,3 +446,73 @@ def replace_or_append_expression(content: str, name: str, new_block: str) -> str
         return "\n".join(lines) + "\n"
     lines[span[0]:span[1]] = new_block.split("\n")
     return "\n".join(lines)
+
+
+# ───────────────────────── relationships.tmdl blocks ─────────────────────────
+# Relationships are matched on their FIELD signature (``A[x] -> B[y]``), never
+# on the block name: the name is usually a GUID that differs per model and
+# changes when Power BI Desktop re-creates a relationship.
+
+def relationship_span(content: str, signature: str) -> Optional[Tuple[int, int]]:
+    """(start, end) lines of the block whose endpoints match `signature`."""
+    from .tmdl import parse_relationships_text, relationship_block_spans
+    lines = content.split("\n")
+    for _name, start, end in relationship_block_spans(content):
+        rels = parse_relationships_text("\n".join(lines[start:end]))
+        if signature in rels:
+            return (start, end)
+    return None
+
+
+def extract_relationship_block(content: str, signature: str) -> Optional[str]:
+    span = relationship_span(content, signature)
+    if span is None:
+        return None
+    return "\n".join(content.split("\n")[span[0]:span[1]])
+
+
+def relationship_names(content: str) -> set:
+    from .tmdl import relationship_block_spans
+    return {name for name, _s, _e in relationship_block_spans(content)}
+
+
+def set_relationship_name(block: str, name: str) -> str:
+    """Rewrite the ``relationship <name>`` declaration line of a block."""
+    lines = block.split("\n")
+    lines[0] = f"relationship {smart_quote(name)}"
+    return "\n".join(lines)
+
+
+def append_relationship_block(content: str, block: str) -> str:
+    """Append a raw relationship block, one blank line as separator."""
+    body = content.rstrip("\n")
+    if not body:
+        return block.rstrip("\n") + "\n"
+    return body + "\n\n" + block.rstrip("\n") + "\n"
+
+
+def replace_relationship_block(content: str, signature: str,
+                               new_block: str) -> Optional[str]:
+    span = relationship_span(content, signature)
+    if span is None:
+        return None
+    lines = content.split("\n")
+    lines[span[0]:span[1]] = new_block.rstrip("\n").split("\n")
+    return "\n".join(lines)
+
+
+def remove_relationship_block(content: str, signature: str) -> Optional[str]:
+    """Content without the matching block (one blank separator collapsed).
+    None if no block matches."""
+    span = relationship_span(content, signature)
+    if span is None:
+        return None
+    lines = content.split("\n")
+    start, end = span
+    if end < len(lines) and lines[end].strip() == "":
+        end += 1
+    elif start > 0 and lines[start - 1].strip() == "":
+        start -= 1
+    del lines[start:end]
+    out = "\n".join(lines)
+    return out if out.strip() else ""

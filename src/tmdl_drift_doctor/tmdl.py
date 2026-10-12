@@ -7,7 +7,9 @@ TMDL's indentation contract (tabs, never spaces):
   ``partition`` / table-level ``annotation``) sit at ONE tab,
 * their properties and annotations sit at TWO tabs,
 * bare multi-line expression bodies sit at THREE-or-more tabs (or blank),
-* fenced expression bodies are wrapped in ``` markers.
+* fenced expression bodies are wrapped in ``` markers,
+* ``relationships.tmdl`` holds column-0 ``relationship <name>`` blocks whose
+  properties sit at ONE tab.
 
 This reader deliberately does NOT round-trip: lineage tags, annotations and
 formatting are preserved by editing the *raw text* (see ``tmdl_edit``), never
@@ -44,6 +46,22 @@ _OBJECT_RE = re.compile(
 _PROP_RE = re.compile(r"^\t\t([A-Za-z][A-Za-z0-9]*)\s*:\s*(.*?)\s*$")
 _FLAG_RE = re.compile(r"^\t\t([A-Za-z][A-Za-z0-9]*)\s*$")
 _REF_TABLE_RE = re.compile(r"^ref table\s+(.+?)\s*$")
+_RELATIONSHIP_RE = re.compile(r"^relationship\s+(.+?)\s*$")
+_REL_PROP_RE = re.compile(r"^\t([A-Za-z][A-Za-z0-9]*)\s*:\s*(.*?)\s*$")
+_REL_FLAG_RE = re.compile(r"^\t([A-Za-z][A-Za-z0-9]*)\s*$")
+
+# Relationship properties that participate in drift comparison, with the
+# engine default each one takes when the line is omitted. Normalizing to the
+# default means an explicit `isActive: true` never registers as drift against
+# a block that simply leaves it out.
+RELATIONSHIP_DEFAULTS = {
+    "fromCardinality": "many",
+    "toCardinality": "one",
+    "isActive": "true",
+    "crossFilteringBehavior": "oneDirection",
+    "securityFilteringBehavior": "oneDirection",
+    "relyOnReferentialIntegrity": "false",
+}
 
 # One row tuple of a DAX DATATABLE literal: `{ "key", ... }` where the first
 # element is the quoted row key. The row-list's OUTER brace never matches
@@ -103,6 +121,7 @@ class Column:
     table: str
     properties: dict = field(default_factory=dict)
     lineage_tag: str = ""
+    expression: str = ""     # DAX of a calculated column, else ""
 
     @property
     def ref(self) -> str:
@@ -123,6 +142,32 @@ class Table:
     columns: dict = field(default_factory=dict)     # name -> Column
     measures: dict = field(default_factory=dict)    # name -> Measure
     partitions: dict = field(default_factory=dict)  # name -> Partition
+    hierarchies: dict = field(default_factory=dict) # name -> [level column]
+
+
+@dataclass
+class Relationship:
+    """One relationship. Identity is the FIELD signature
+    ``FromTable[col] -> ToTable[col]``; the block name (usually a GUID) is
+    per-model noise and never participates in comparison."""
+    name: str
+    from_table: str
+    from_column: str
+    to_table: str
+    to_column: str
+    properties: dict = field(default_factory=dict)  # normalized, see defaults
+
+    @property
+    def signature(self) -> str:
+        return relationship_signature(self.from_table, self.from_column,
+                                      self.to_table, self.to_column)
+
+    def touches_table(self, table: str) -> bool:
+        return table in (self.from_table, self.to_table)
+
+    def touches_column(self, table: str, column: str) -> bool:
+        return ((self.from_table, self.from_column) == (table, column)
+                or (self.to_table, self.to_column) == (table, column))
 
 
 @dataclass
@@ -131,6 +176,7 @@ class Model:
     tables: dict = field(default_factory=dict)      # name -> Table
     expressions: dict = field(default_factory=dict) # name -> raw block text
     ref_tables: list = field(default_factory=list)  # model.tmdl `ref table`s
+    relationships: dict = field(default_factory=dict)  # signature -> Relationship
 
     def measure(self, table: str, name: str) -> Optional[Measure]:
         t = self.tables.get(table)
@@ -139,6 +185,16 @@ class Model:
     def column(self, table: str, name: str) -> Optional[Column]:
         t = self.tables.get(table)
         return t.columns.get(name) if t else None
+
+    def measure_hosts(self) -> dict:
+        """{measure name: [host tables]} across the whole model. Measure
+        names are model-global in the engine, so this is the index every
+        name-keyed decision must consult."""
+        out: dict = {}
+        for tname, table in self.tables.items():
+            for mname in table.measures:
+                out.setdefault(mname, []).append(tname)
+        return out
 
 
 def _is_expr_continuation(line: str) -> bool:
@@ -244,13 +300,15 @@ def parse_table_file(path: Path) -> Table:
             continue
         name, inline = _split_decl(rest)
         if keyword == "column":
+            expr = ""
             if inline:  # calculated column: `column X = <dax>`
                 expr, i = _read_expression(lines, i, inline)
             else:
                 i += 1
             props, lineage, i = _collect_properties(lines, i)
             table.columns[name] = Column(name=name, table=table_name,
-                                         properties=props, lineage_tag=lineage)
+                                         properties=props, lineage_tag=lineage,
+                                         expression=expr)
         elif keyword == "measure":
             expr, i = _read_expression(lines, i, inline)
             props, lineage, i = _collect_properties(lines, i)
@@ -277,8 +335,19 @@ def parse_table_file(path: Path) -> Table:
             table.partitions[name] = Partition(name=name, table=table_name,
                                                source=src)
             i = j
-        else:  # hierarchy — consume and ignore
-            i += 1
+        else:  # hierarchy: record which columns its levels use
+            levels: list = []
+            j = i + 1
+            while j < len(lines):
+                line = lines[j]
+                if line.strip() and not line.startswith("\t\t"):
+                    break
+                lm = re.match(r"^\t\t\tcolumn\s*:\s*(.+?)\s*$", line)
+                if lm:
+                    levels.append(unquote(lm.group(1)))
+                j += 1
+            table.hierarchies[name] = levels
+            i = j
     return table
 
 
@@ -325,6 +394,8 @@ def parse_model(definition: Path) -> Model:
             t = parse_table_file(f)
             model.tables[t.name] = t
     model.expressions = parse_expressions_file(definition / "expressions.tmdl")
+    model.relationships = parse_relationships_file(
+        definition / "relationships.tmdl")
     model_file = definition / "model.tmdl"
     if model_file.exists():
         for line in model_file.read_text(encoding="utf-8").split("\n"):
@@ -334,18 +405,340 @@ def parse_model(definition: Path) -> Model:
     return model
 
 
+def relationship_signature(from_table: str, from_column: str,
+                           to_table: str, to_column: str) -> str:
+    return f"{from_table}[{from_column}] -> {to_table}[{to_column}]"
+
+
+def parse_signature(sig: str) -> tuple:
+    """``A[x] -> B[y]`` -> (A, x, B, y). Raises DriftDoctorError on a
+    malformed signature."""
+    m = re.match(r"^(.+)\[([^\]]+)\]\s*->\s*(.+)\[([^\]]+)\]$", sig.strip())
+    if not m:
+        raise DriftDoctorError(
+            f"malformed relationship signature {sig!r}; expected "
+            f"'FromTable[column] -> ToTable[column]'")
+    return m.group(1).strip(), m.group(2), m.group(3).strip(), m.group(4)
+
+
+def _parse_column_ref(value: str) -> Optional[tuple]:
+    """``'Plan Map'.PlanKey`` / ``Visits.'Member Id'`` -> (table, column)."""
+    m = re.match(r"^\s*(?:'((?:[^']|'')+)'|([^.']+))\.(?:'((?:[^']|'')+)'|(.+?))\s*$",
+                 value)
+    if not m:
+        return None
+    table = (m.group(1) or m.group(2)).replace("''", "'").strip()
+    column = (m.group(3) or m.group(4)).replace("''", "'").strip()
+    return table, column
+
+
+def relationship_block_spans(content: str) -> list:
+    """[(name, start_line, end_line)] for every column-0 relationship block:
+    the declaration through its one-tab property/annotation lines, trailing
+    blanks excluded."""
+    lines = content.split("\n")
+    spans = []
+    i = 0
+    while i < len(lines):
+        m = _RELATIONSHIP_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        start = i
+        j = i + 1
+        while j < len(lines) and (lines[j].strip() == ""
+                                  or lines[j].startswith("\t")):
+            j += 1
+        end = j
+        while end - 1 > start and lines[end - 1].strip() == "":
+            end -= 1
+        spans.append((unquote(m.group(1)), start, end))
+        i = j
+    return spans
+
+
+def parse_relationships_text(content: str, where: str = "relationships.tmdl") -> dict:
+    """{signature: Relationship}. A block without both endpoints is skipped
+    (it cannot be identified); a repeated signature keeps the first block."""
+    out: dict = {}
+    lines = content.split("\n")
+    for name, start, end in relationship_block_spans(content):
+        props: dict = {}
+        ends = {}
+        for line in lines[start + 1:end]:
+            pm = _REL_PROP_RE.match(line)
+            if pm:
+                key, value = pm.group(1), pm.group(2)
+                if key in ("fromColumn", "toColumn"):
+                    ref = _parse_column_ref(value)
+                    if ref:
+                        ends[key] = ref
+                elif key in RELATIONSHIP_DEFAULTS:
+                    props[key] = value
+                continue
+            fm = _REL_FLAG_RE.match(line)
+            if fm and fm.group(1) in RELATIONSHIP_DEFAULTS:
+                props[fm.group(1)] = "true"
+        if "fromColumn" not in ends or "toColumn" not in ends:
+            continue
+        normalized = {k: props.get(k, d) for k, d in RELATIONSHIP_DEFAULTS.items()}
+        rel = Relationship(name=name, from_table=ends["fromColumn"][0],
+                           from_column=ends["fromColumn"][1],
+                           to_table=ends["toColumn"][0],
+                           to_column=ends["toColumn"][1],
+                           properties=normalized)
+        out.setdefault(rel.signature, rel)
+    return out
+
+
+def parse_relationships_file(path: Path) -> dict:
+    path = Path(path)
+    if not path.exists():
+        return {}
+    return parse_relationships_text(path.read_text(encoding="utf-8"), str(path))
+
+
+# ───────────────────── string-aware expression scanning ─────────────────────
+
+def _string_end(text: str, i: int) -> int:
+    """Index just past the double-quoted literal opening at ``text[i]``
+    (``""`` is an escaped quote in both DAX and M)."""
+    j = i + 1
+    n = len(text)
+    while j < n:
+        if text[j] == '"':
+            if j + 1 < n and text[j + 1] == '"':
+                j += 2
+                continue
+            return j + 1
+        j += 1
+    return n
+
+
+def _opaque_end(text: str, i: int) -> Optional[int]:
+    """End of a single-line DAX identifier span opening at ``text[i]``:
+    ``'Quoted Table'`` or a ``[Bracket Name]`` that contains no string or
+    nesting (so ``[Member's Count]`` is never misread as opening a quote).
+    None when the character does not open such a span."""
+    eol = text.find("\n", i)
+    eol = len(text) if eol < 0 else eol
+    c = text[i]
+    if c == "'":
+        j = i + 1
+        while j < eol:
+            if text[j] == "'":
+                if j + 1 < eol and text[j + 1] == "'":
+                    j += 2
+                    continue
+                return j + 1
+            j += 1
+        return None
+    if c == "[":
+        k = text.find("]", i + 1)
+        if 0 <= k < eol and not any(ch in text[i + 1:k] for ch in '"[{'):
+            return k + 1
+    return None
+
+
+def strip_comments(text: str) -> str:
+    """Remove ``//`` and ``--`` line comments and ``/* */`` block comments
+    that sit OUTSIDE string literals and quoted identifiers. A URL inside a
+    string (``"https://host/path"``) is content, never a comment."""
+    out: list = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = _string_end(text, i)
+            out.append(text[i:j])
+            i = j
+            continue
+        if c in "'[":
+            j = _opaque_end(text, i)
+            if j is not None:
+                out.append(text[i:j])
+                i = j
+                continue
+        if text.startswith("//", i) or text.startswith("--", i):
+            eol = text.find("\n", i)
+            i = n if eol < 0 else eol
+            out.append(" ")
+            continue
+        if text.startswith("/*", i):
+            k = text.find("*/", i + 2)
+            i = n if k < 0 else k + 2
+            out.append(" ")
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _split_top_level(body: str) -> list:
+    """Split on commas outside strings and nested brackets."""
+    parts, depth, cur, i = [], 0, [], 0
+    while i < len(body):
+        c = body[i]
+        if c == '"':
+            j = _string_end(body, i)
+            cur.append(body[i:j])
+            i = j
+            continue
+        if c in "[({":
+            depth += 1
+        elif c in "])}":
+            depth -= 1
+        if c == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+        i += 1
+    parts.append("".join(cur))
+    return parts
+
+
+def _canonical_meta_item(item: str) -> str:
+    item = re.sub(r"\s+", " ", item).strip()
+    m = re.match(r"^([^=\"]+?)\s*=\s*(.*)$", item)
+    return f"{m.group(1)} = {m.group(2)}" if m else item
+
+
+def canonicalize_meta(text: str) -> str:
+    """Rewrite every ``meta [k = v, ...]`` record outside string literals
+    into one canonical form: items split, trimmed and sorted. Power BI
+    Desktop reorders these bags on save; the order carries no meaning."""
+    out: list = []
+    i, n = 0, len(text)
+    meta = re.compile(r"\bmeta\s*\[")
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = _string_end(text, i)
+            out.append(text[i:j])
+            i = j
+            continue
+        m = meta.match(text, i)
+        if m and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            depth, j = 1, m.end()
+            while j < n and depth:
+                if text[j] == '"':
+                    j = _string_end(text, j)
+                    continue
+                if text[j] == "[":
+                    depth += 1
+                elif text[j] == "]":
+                    depth -= 1
+                j += 1
+            if depth == 0:
+                items = [_canonical_meta_item(p)
+                         for p in _split_top_level(text[m.end():j - 1])]
+                items = sorted(p for p in items if p)
+                out.append("meta [" + ", ".join(items) + "]")
+                i = j
+                continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def normalize_expression(expr: Optional[str]) -> str:
-    """Reduce an expression to its comparable form: DAX/M comments stripped,
-    fence markers removed, whitespace collapsed. Reformatting a measure must
-    never register as drift."""
+    """Reduce an expression to its comparable form: fence markers removed,
+    DAX/M comments stripped (string-aware), ``meta [...]`` bags put in
+    canonical order, whitespace collapsed. Reformatting a measure or a
+    Desktop re-save must never register as drift; a changed string literal
+    (a URL, a label) always does."""
     if not expr:
         return ""
     t = expr.replace("```", " ")
-    t = re.sub(r"/\*.*?\*/", " ", t, flags=re.DOTALL)
-    t = re.sub(r"(?m)//[^\n]*", " ", t)
-    t = re.sub(r"(?m)^\s*--[^\n]*", " ", t)
+    t = strip_comments(t)
+    t = canonicalize_meta(t)
     t = re.sub(r"\s+", " ", t)
     return t.strip()
+
+
+def blank_strings(text: str) -> str:
+    """Comments removed and every string literal emptied to ``""``, so a
+    reference scan never matches inside text."""
+    t = strip_comments(text or "")
+    out, i = [], 0
+    while i < len(t):
+        if t[i] == '"':
+            j = _string_end(t, i)
+            out.append('""')
+            i = j
+            continue
+        out.append(t[i])
+        i += 1
+    return "".join(out)
+
+
+def dax_references(expr: Optional[str]) -> dict:
+    """What a DAX expression refers to, from a string-aware token scan:
+
+    * ``qualified``: {(table, name)} for ``Table[Name]`` / ``'Table'[Name]``
+    * ``bare``: {name} for unqualified ``[Name]`` (a measure, or a column
+      through row context)
+    * ``tables``: table names referenced as ``'Quoted'`` or bare words, plus
+      every qualified ref's table (callers intersect bare words with the
+      table names they know, since a bare word may be a function or a VAR)
+    """
+    text = blank_strings(expr or "").replace("```", " ")
+    qualified, bare, tables = set(), set(), set()
+    i, n = 0, len(text)
+
+    def bracket_after(k: int):
+        if k < n and text[k] == "[":
+            close = text.find("]", k + 1)
+            eol = text.find("\n", k)
+            if close > k and (eol < 0 or close < eol):
+                return text[k + 1:close], close + 1
+        return None, k
+
+    while i < n:
+        c = text[i]
+        if c == '"':
+            i = _string_end(text, i)
+            continue
+        if c == "'":
+            j = _opaque_end(text, i)
+            if j is None:
+                i += 1
+                continue
+            table = text[i + 1:j - 1].replace("''", "'")
+            name, k = bracket_after(j)
+            if name is not None:
+                qualified.add((table, name))
+            tables.add(table)
+            i = k
+            continue
+        if c.isalpha() or c == "_":
+            j = i
+            while j < n and (text[j].isalnum() or text[j] == "_"):
+                j += 1
+            word = text[i:j]
+            name, k = bracket_after(j)
+            if name is not None:
+                qualified.add((word, name))
+                tables.add(word)
+                i = k
+                continue
+            if j >= n or text[j] != "(":
+                tables.add(word)
+            i = j
+            continue
+        if c == "[":
+            name, k = bracket_after(i)
+            if name is not None:
+                bare.add(name)
+                i = k
+                continue
+        if c.isdigit():
+            while i < n and (text[i].isalnum() or text[i] in "._"):
+                i += 1
+            continue
+        i += 1
+    return {"qualified": qualified, "bare": bare, "tables": tables}
 
 
 def parse_mapping_rows(source: str) -> dict:
