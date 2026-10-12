@@ -35,6 +35,10 @@ table Members
 		formatString: 0.00
 		lineageTag: aaaa1111-1111-4111-8111-000000000008
 
+	measure 'Visits per Member' = DIVIDE([Total Visits], [Active Members])
+		formatString: 0.00
+		lineageTag: aaaa1111-1111-4111-8111-000000000009
+
 	partition Members = m
 		mode: import
 		source =

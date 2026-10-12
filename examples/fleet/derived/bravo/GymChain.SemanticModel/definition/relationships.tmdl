@@ -1,0 +1,14 @@
+relationship bbbb7777-0000-4000-8000-000000000001
+	crossFilteringBehavior: bothDirections
+	fromColumn: Visits.MemberId
+	toColumn: Members.MemberId
+
+relationship bbbb7777-0000-4000-8000-000000000003
+	isActive: false
+	fromColumn: Visits.PromoId
+	toColumn: Promotions.PromoId
+
+relationship bbbb7777-0000-4000-8000-000000000004
+	isActive: false
+	fromColumn: Members.JoinDate
+	toColumn: Promotions.StartDate

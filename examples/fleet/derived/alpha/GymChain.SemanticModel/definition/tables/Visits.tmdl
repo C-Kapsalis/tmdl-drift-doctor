@@ -26,6 +26,12 @@ table Visits
 		summarizeBy: sum
 		sourceColumn: DurationMinutes
 
+	column PromoId
+		dataType: int64
+		lineageTag: aaaa2222-2222-4222-8222-000000000010
+		summarizeBy: none
+		sourceColumn: PromoId
+
 	measure 'Total Visits' = COUNTROWS(FILTER(Visits, Visits[DurationMinutes] > 0))
 		formatString: #,0
 		lineageTag: aaaa2222-2222-4222-8222-000000000006

@@ -1,9 +1,14 @@
-expression 'Reporting Start Date' = #date(2024, 1, 1) meta [IsParameterQuery = true, Type = "Date", IsParameterQueryRequired = true]
+expression 'Reporting Start Date' = #date(2024, 1, 1) meta [IsParameterQueryRequired=true, IsParameterQuery=true, Type="Date"]
 	lineageTag: bbbb6666-6666-4666-8666-000000000001
 
 	annotation PBI_ResultType = Date
 
 expression 'Data Source' = "bravo-warehouse" meta [IsParameterQuery = true, Type = "Text", IsParameterQueryRequired = true]
 	lineageTag: bbbb6666-6666-4666-8666-000000000002
+
+	annotation PBI_ResultType = Text
+
+expression 'Portal URL' = "https://portal.gymchain.example/reports" meta [Type = "Text", IsParameterQueryRequired = true, IsParameterQuery = true]
+	lineageTag: bbbb6666-6666-4666-8666-000000000003
 
 	annotation PBI_ResultType = Text

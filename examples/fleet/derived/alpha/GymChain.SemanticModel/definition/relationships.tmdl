@@ -1,0 +1,12 @@
+relationship aaaa7777-0000-4000-8000-000000000001
+	fromColumn: Visits.MemberId
+	toColumn: Members.MemberId
+
+relationship aaaa7777-0000-4000-8000-000000000002
+	fromColumn: Members.MembershipTier
+	toColumn: 'Plan Map'.PlanKey
+
+relationship aaaa7777-0000-4000-8000-000000000003
+	isActive: false
+	fromColumn: Visits.PromoId
+	toColumn: Promotions.PromoId

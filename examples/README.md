@@ -40,10 +40,19 @@ one of these wrapper files — it reads only `GymChain.SemanticModel/definition/
 | alpha | `measure.property_drift` | `Visits[Avg Visit Duration]` | Someone changed the format string to `0.00` |
 | alpha | `expression.drift` | `Reporting Start Date` | Shared reporting-window parameter left at an old date |
 | alpha | `extra.measure` | `Members[Alpha Loyalty Score]` | Alpha's own KPI — **advisory**, never remediated |
+| alpha | `measure.wrong_host` | `Visits[Visits per Member]` | Alpha keeps this template measure on `Members`; the fix moves it verbatim |
+| alpha | `expression.drift` | `Portal URL` | The report-portal link still points at the old path (a change inside an `https://` string) |
+| alpha | `extra.measure` | `Classes[Alpha Seats Left]` | Alpha's own KPI that reads `Classes[Capacity]`: retire that column and the retirement is **blocked** |
 | bravo | `table.missing` | `Classes` | The template gained a class-schedule table bravo never got |
 | bravo | `column.missing` | `Members[MembershipTier]` | Bravo deleted the tier column |
 | bravo | `column.property_drift` | `Members[JoinDate]` | Hand-edited to `dd/mm/yyyy` |
 | bravo | `mapping_row.missing` | `Plan Map/elite` | Bravo's plan lookup lacks the Elite tier row |
+| bravo | `relationship.missing` | `Members[MembershipTier] -> Plan Map[PlanKey]` | Needs the missing column first; the same run adds both, in order |
+| bravo | `relationship.modified` | `Visits[MemberId] -> Members[MemberId]` | Someone switched it to filter in both directions |
+| bravo | `relationship.extra` | `Members[JoinDate] -> Promotions[StartDate]` | Bravo's own relationship: **advisory** |
+
+Bravo also re-saved its `Reporting Start Date` parameter with the `meta [...]`
+bag in a different order. That is not drift, and it is not flagged.
 
 The `Data Source` parameter differs in every model too — and is never
 flagged, because only allowlist-**named** shared expressions are compared.
@@ -80,7 +89,7 @@ in every shell — only the copy step above differs between bash and PowerShell.
 ```console
 $ drift-doctor capture
 baseline written: .drift-doctor/baseline.json
-  tables=5 columns=16 measures=8 mapping_rows=4 expressions=2
+  tables=5 columns=17 measures=9 relationships=3 mapping_rows=4 expressions=3
 ```
 
 **2. Detect** — read-only; exits 1 because remediable drift exists:
@@ -88,7 +97,7 @@ baseline written: .drift-doctor/baseline.json
 ```console
 $ drift-doctor detect
 
-── alpha: 5 finding(s)
+── alpha: 8 finding(s)
   measure.missing              Members[New Members #]
   measure.expression_drift     Visits[Total Visits]
       template: COUNTROWS(Visits)
@@ -96,16 +105,28 @@ $ drift-doctor detect
   measure.property_drift       Visits[Avg Visit Duration]
       template: formatString=0.0
       derived:  formatString=0.00
+  measure.wrong_host           Visits[Visits per Member]
+      template: Visits
+      derived:  Members
+  expression.drift             Portal URL
   expression.drift             Reporting Start Date
+  extra.measure                Classes[Alpha Seats Left]  [advisory]
   extra.measure                Members[Alpha Loyalty Score]  [advisory]
 
-── bravo: 4 finding(s)
+── bravo: 7 finding(s)
   table.missing                Classes
   column.property_drift        Members[JoinDate]
       template: dataType=dateTime, formatString=yyyy-mm-dd, ...
       derived:  dataType=dateTime, formatString=dd/mm/yyyy, ...
   column.missing               Members[MembershipTier]
   mapping_row.missing          Plan Map/elite
+  relationship.missing         Members[MembershipTier] -> Plan Map[PlanKey]
+  relationship.modified        Visits[MemberId] -> Members[MemberId]
+      template: (engine defaults)
+      derived:  crossFilteringBehavior=bothDirections
+  relationship.extra           Members[JoinDate] -> Promotions[StartDate]  [advisory]
+
+── summary: actionable=12 advisory=3 overridden=0 errors=0
 ```
 
 **3. Preview** the cascade — unified diffs, zero writes (not even the ledger):
@@ -117,20 +138,24 @@ $ drift-doctor remediate --dry-run
 +++ b/.../derived/alpha/GymChain.SemanticModel/definition/tables/Members.tmdl
 @@ -35,6 +35,18 @@
 ...
-── summary: applied=0 would-apply=8 skipped=1 failed=0
+── summary: applied=0 would-apply=12 skipped=3 blocked=0 auto_skipped_precondition=0 overridden=0 failed=0
 ```
 
-**4. Apply** — the advisory extra is skipped, everything else cascades:
+**4. Apply**: the advisories are skipped, everything else cascades in
+dependency order (tables, columns, expressions, rows, measures, then
+relationships):
 
 ```console
 $ drift-doctor remediate
 ...
 [skipped] alpha: extra.measure Members[Alpha Loyalty Score] — advisory — this object exists only in the derived model; extensions are reported for review, never auto-remediated. ...
-── summary: applied=8 would-apply=0 skipped=1 failed=0
+── summary: applied=12 would-apply=0 skipped=3 blocked=0 auto_skipped_precondition=0 overridden=0 failed=0
 ```
 
-A second `remediate` applies nothing (`applied=0 skipped=1`) — every applier
-is idempotent. `detect` now exits 0 with only the advisory left.
+A second `remediate` applies nothing (`applied=0 skipped=3`): every applier
+is idempotent. `detect` now exits 0 with only the advisories left. When one
+fix can only be seen after another lands, `remediate --converge` re-detects
+and re-applies until nothing changes (at most four passes).
 
 **5. Ledger** — the append-only audit trail of what just happened:
 
@@ -218,7 +243,7 @@ the retirement cascade — and protect one franchise that wants to keep it.
 
    ```console
    $ drift-doctor capture
-     tables=5 columns=16 measures=7 mapping_rows=4 expressions=2
+     tables=5 columns=17 measures=8 relationships=3 mapping_rows=4 expressions=3
      [ledger] retired measure: Visits[Peak Hour Visits]
    ```
 
@@ -226,10 +251,12 @@ the retirement cascade — and protect one franchise that wants to keep it.
 
    ```console
    $ drift-doctor detect
-   ── alpha: 2 finding(s)
+   ── alpha: 3 finding(s)
+     extra.measure                Classes[Alpha Seats Left]  [advisory]
      extra.measure                Members[Alpha Loyalty Score]  [advisory]
      retire.measure               Visits[Peak Hour Visits]
-   ── bravo: 1 finding(s)
+   ── bravo: 2 finding(s)
+     relationship.extra           Members[JoinDate] -> Promotions[StartDate]  [advisory]
      retire.measure               Visits[Peak Hour Visits]
    ```
 
@@ -250,7 +277,7 @@ the retirement cascade — and protect one franchise that wants to keep it.
 
    $ drift-doctor remediate --kind retire. --sync
    [applied] bravo: retire.measure Visits[Peak Hour Visits] — remove retired measure block
-   ── summary: applied=1 would-apply=0 skipped=0 failed=0
+   ── summary: applied=1 would-apply=0 skipped=0 blocked=0 auto_skipped_precondition=0 overridden=0 failed=0
    ```
 
 6. `detect` exits 0. Alpha's kept measure is now reported as an advisory
@@ -268,11 +295,30 @@ the retirement cascade — and protect one franchise that wants to keep it.
 Done experimenting? Delete your copy and re-copy `examples/fleet` — the
 shipped fleet is always in its pristine pre-retirement state.
 
+## Act three: the governance commands
+
+On the same copy, after the walkthrough above:
+
+```console
+$ drift-doctor ratchet tighten        # seed .drift-doctor/floors.json
+$ drift-doctor ratchet check          # exit 1 if any model's drift rises
+$ drift-doctor audit                  # exit 4 if an applied fix was undone
+$ drift-doctor review --out REVIEW.md # the checklist of human decisions
+```
+
+To see the coupling guard, retire `Classes[Capacity]` from the template
+(delete the column block, and change `SUM(Classes[Capacity])` in
+`Class Fill Rate %` to `COUNTROWS(Classes)`), add `retire.column` to the
+allowlist, recapture, and run `remediate --sync`. Bravo's copy of the column
+is removed; alpha's is `blocked`, because alpha's own `Alpha Seats Left`
+still reads it.
+
 ## Going deeper
 
-- The step-by-step narrated version of this walkthrough:
-  [docs/tutorials/getting-started.md](../docs/tutorials/getting-started.md)
-- Every drift kind, detection rule and gate:
-  [docs/reference/drift-kinds.md](../docs/reference/drift-kinds.md)
-- The same fleet also lives at `tests/fixtures/fleet/` where it doubles as
-  the test suite's specification.
+- The step-by-step narrated version of this walkthrough, every drift kind,
+  and the configuration reference are in the documentation
+  (`tmdl-drift-doctor-documentation`, published on Read the Docs).
+- The same fleet also lives at `tests/fixtures/fleet/`, where it doubles as
+  the test suite's specification (with a few more seeded cases, such as a
+  measure stored on two tables, which would stop the model from opening in
+  Power BI Desktop and so is left out of this example).

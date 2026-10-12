@@ -7,11 +7,21 @@ template: template/GymChain.SemanticModel
 models:
   alpha: derived/alpha/GymChain.SemanticModel
   bravo: derived/bravo/GymChain.SemanticModel
+  # Long form, for per-model gating and declared divergence:
+  # bravo:
+  #   path: derived/bravo/GymChain.SemanticModel
+  #   gating: advisory          # findings print but never fail CI
+  #   overrides:
+  #     - object: Members[JoinDate]
+  #       kind: expression      # expression | absent | retain
+  #       reason: bravo reports dates day-first by contract
+  #       owner: bravo-analytics
+  #       added: 2026-10-12
 
 mapping_tables:          # tables whose DATATABLE rows are diffed row-by-row
   - Plan Map
 
-state_dir: .drift-doctor # baseline.json + ledger.jsonl land here
+state_dir: .drift-doctor # baseline.json, ledger.jsonl, floors.json land here
 
 # Starter allowlist: every NON-DESTRUCTIVE kind is permitted, so a plain
 # `remediate` can insert and overwrite. Retirement (the only deletions) stays
@@ -26,8 +36,12 @@ allowlist:
     - measure.missing
     - measure.expression_drift
     - measure.property_drift
+    - measure.wrong_host   # verbatim move to the template's host table
     - expression.drift
     - mapping_row.missing
+    - relationship.missing
+    - relationship.modified
     - retire.measure       # deletions additionally require --sync at run time
   expressions:
     - Reporting Start Date # ONLY named expressions are ever compared
+    - Portal URL
