@@ -2,7 +2,7 @@
 
 `tmdl-drift-doctor` is a Python CLI that detects and auto-remediates drift
 across a **fleet of TMDL-format Power BI semantic models derived from one
-template** — you maintain one "golden" model, and the tool cascades its truth
+template**: you maintain one "golden" model, and the tool cascades its truth
 back out to the per-client copies, safely and auditably. Contributions of all
 kinds are welcome: new drift kinds, bug fixes, docs, and example fleets.
 
@@ -25,7 +25,7 @@ pytest                     # the full suite should pass before you start
 
 The editable install puts the `drift-doctor` console command on your PATH, so
 your code changes are picked up immediately. Try it against the bundled
-example fleet (copy it somewhere writable first — running the tool writes
+example fleet (copy it somewhere writable first: running the tool writes
 state and edits models):
 
 ```bash
@@ -51,16 +51,19 @@ src/tmdl_drift_doctor/
 └── ledger.py       # append-only JSONL audit trail (retire/revive/remediated)
 
 tests/              # pytest suite + tests/fixtures/fleet/ (the seeded fleet)
-docs/               # Diátaxis docs: tutorials / how-to / reference / explanation
 examples/fleet/     # runnable gym-chain fleet with drift pre-seeded
 ```
+
+The full Diátaxis documentation (tutorials, how-to guides, reference,
+explanation) lives in the separate `tmdl-drift-doctor-documentation`
+repository, published on Read the Docs.
 
 ## The mental model
 
 Three commands form a pipeline, and every design decision follows from it:
 
 1. **`capture`** snapshots the template into a committed baseline
-   (`.drift-doctor/baseline.json`) and maintains the retirement record —
+   (`.drift-doctor/baseline.json`) and maintains the retirement record:
    anything dropped from the template since the last capture becomes a
    `retired` ledger event.
 2. **`detect`** compares each derived model (parsed live from disk) against
@@ -71,33 +74,33 @@ Three commands form a pipeline, and every design decision follows from it:
 
 ### Safety gates (do not weaken these without discussion)
 
-- **Allowlist** — nothing cascades by default. A drift kind the fleet's
+- **Allowlist**: nothing cascades by default. A drift kind the fleet's
   `allowlist.kinds` does not name is detected and reported, never applied.
   Shared expressions are compared only if individually named under
   `allowlist.expressions`, so per-tenant connection parameters can never be
   repointed by a careless cascade.
-- **`--sync` (double-gated deletions)** — the only removals ever proposed are
+- **`--sync` (double-gated deletions)**: the only removals ever proposed are
   of objects *provably retired from the template* (`retire.*` kinds), and
   applying them requires **both** the allowlist entry **and** the `--sync`
   flag. A default `remediate` run is purely additive/overwriting.
-- **Ledger** — every retirement, revival, and applied fix is one immutable
+- **Ledger**: every retirement, revival, and applied fix is one immutable
   append-only JSONL line. A retirement recorded at recapture is the *only*
   thing that ever authorizes a downstream deletion; a revival cancels a
   retirement without erasing history, so a deliberate re-add is never
   re-removed.
-- **Baseline-recapture discipline** — `detect` and `remediate` refuse to run
+- **Baseline-recapture discipline**: `detect` and `remediate` refuse to run
   on a stale baseline (template changed since the last `capture`), because a
   stale baseline misclassifies drift: a retired object looks "missing" and
   gets resurrected. `--allow-stale` overrides, at your own risk. **Recapture
   the moment you change the template.**
-- **Guarded TMDL surgery** — edits splice *raw text blocks* (never
+- **Guarded TMDL surgery**: edits splice *raw text blocks* (never
   re-serialize from parsed fields, so annotations and formatting survive),
   lineage tags are regenerated on insert and preserved on overwrite, and
   every new file content passes `tmdl_edit.assert_tmdl_valid` before it
-  touches disk — including the invariant that a property line is never
+  touches disk, including the invariant that a property line is never
   injected into a DAX expression body (which would break every affected
-  measure fleet-wide). See
-  [`docs/explanation/safe-tmdl-surgery.md`](docs/explanation/safe-tmdl-surgery.md).
+  measure fleet-wide). See the "safe TMDL surgery" explanation page in
+  `tmdl-drift-doctor-documentation`.
 
 ## How to add a new drift kind
 
@@ -105,28 +108,28 @@ Drift kinds are named `family.detail` (e.g. `measure.expression_drift`) and
 that string is what users put in their allowlist, so choose it carefully.
 Work through these files in order:
 
-1. **`detect.py`** — emit a `Finding(kind="your.kind", …)` in `detect_model`
+1. **`detect.py`**: emit a `Finding(kind="your.kind", …)` in `detect_model`
    where the divergence is discovered. Register the kind in the right tuple at
    the top of the module: `REMEDIABLE_KINDS` (has an automated fix),
    `ADVISORY_KINDS` (report-only, never applied), and/or
-   `RETIREMENT_FINDING_KINDS` (a deletion — automatically `--sync`-gated).
+   `RETIREMENT_FINDING_KINDS` (a deletion, automatically `--sync`-gated).
    Stash any surgery-time extras on `Finding.data`.
-2. **`tmdl_edit.py`** — if the fix needs a new text operation, add a *guarded*
+2. **`tmdl_edit.py`**: if the fix needs a new text operation, add a *guarded*
    raw-block helper there. Splice raw blocks; never rebuild TMDL from parsed
    dataclasses. Make sure `assert_tmdl_valid` still accepts your output.
-3. **`remediate.py`** — write an applier `_apply_your_kind(fleet, f)` that
+3. **`remediate.py`**: write an applier `_apply_your_kind(fleet, f)` that
    returns `(label, [FileChange])` (a `FileChange` with `old=None` creates,
    `new=None` deletes) and register it in the `APPLIERS` dict. The engine
-   handles the allowlist, `--sync`, dry-run, and pre-write validation for you
-   — appliers must be **idempotent** (a second run finds nothing to do).
-4. **Fixtures + tests** — seed the new drift in `tests/fixtures/fleet/` (the
+   handles the allowlist, `--sync`, dry-run, and pre-write validation for
+   you; appliers must be **idempotent** (a second run finds nothing to do).
+4. **Fixtures + tests**: seed the new drift in `tests/fixtures/fleet/` (the
    fixture fleet doubles as the suite's readable specification) and add
    coverage under `tests/` (detection, allowlist gating, remediation,
    idempotence; safety-critical surgery goes in `tests/test_tmdl_edit_safety.py`).
-5. **Docs** — document the kind in
-   [`docs/reference/drift-kinds.md`](docs/reference/drift-kinds.md), add it to
-   the drift-kinds table in `README.md`, and add an explanation page if it
-   introduces new behavior.
+5. **Docs**: document the kind in the drift-kind catalog reference page in
+   `tmdl-drift-doctor-documentation`, add it to the drift-kinds table in
+   `README.md`, and add an explanation page there if it introduces new
+   behavior.
 
 ## Before you open a PR
 
@@ -158,7 +161,7 @@ behavior needs new tests.
 When filing a bug, include: the `drift-doctor` version, your Python version
 and OS, the command you ran, and the full output (findings, diffs, or the
 error). A minimal `fleet.yml` and the smallest TMDL snippet that reproduces
-the problem help enormously — the fixture fleet under `tests/fixtures/fleet/`
+the problem help enormously; the fixture fleet under `tests/fixtures/fleet/`
 is a good template for a reproduction. For feature requests, describe the
 drift you need caught or cascaded and why the existing kinds do not cover it.
 
