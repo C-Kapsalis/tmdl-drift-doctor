@@ -41,22 +41,30 @@ walkthrough (capture → detect → remediate → ledger, plus retirement/reviva
 
 ```
 src/tmdl_drift_doctor/
-├── cli.py          # Click entry point: capture / detect / remediate / ledger
-├── fleet.py        # fleet.yml loader + Fleet dataclass (paths, allowlist)
-├── tmdl.py         # TMDL folder-format parser -> Model / tables / measures / …
+├── cli.py          # Click entry point: capture / detect / remediate / ratchet /
+│                   #   audit / review / ledger
+├── fleet.py        # fleet.yml loader + Fleet (paths, allowlist, gating, overrides)
+├── overrides.py    # resolve per-model overrides; which findings each acknowledges
+├── tmdl.py         # TMDL parser -> Model (tables, measures, relationships,
+│                   #   hierarchies) + string-aware normalization, DAX references
 ├── baseline.py     # `capture`: snapshot the template, maintain retirements
-├── detect.py       # `detect`: typed Finding objects, one per divergence
-├── remediate.py    # `remediate`: appliers per kind + the gate engine
+├── detect.py       # `detect`: typed Findings, coupling guard, actionable
+│                   #   predicate, the JSON report (schema v2)
+├── remediate.py    # `remediate`: appliers, preconditions, dependency order,
+│                   #   the gate engine, --converge
 ├── tmdl_edit.py    # guarded raw-block TMDL surgery + write validators
-└── ledger.py       # append-only JSONL audit trail (retire/revive/remediated)
+├── ledger.py       # append-only JSONL audit trail (retire/revive/remediated)
+├── ratchet.py      # `ratchet check|tighten`: per-model floors, hard-zero retire.*
+├── audit.py        # `audit`: re-verify applied fixes from the ledger
+└── review.py       # `review`: the human review checklist
 
 tests/              # pytest suite + tests/fixtures/fleet/ (the seeded fleet)
 examples/fleet/     # runnable gym-chain fleet with drift pre-seeded
 ```
 
-The full Diátaxis documentation (tutorials, how-to guides, reference,
-explanation) lives in the separate `tmdl-drift-doctor-documentation`
-repository, published on Read the Docs.
+The full Diátaxis documentation (a tutorial, how-to guides and reference
+pages) lives in the separate `tmdl-drift-doctor-documentation` repository,
+published on Read the Docs.
 
 ## The mental model
 
@@ -68,9 +76,17 @@ Three commands form a pipeline, and every design decision follows from it:
    `retired` ledger event.
 2. **`detect`** compares each derived model (parsed live from disk) against
    the baseline plus the retirement record and emits typed `Finding`s. It is
-   read-only and CI-friendly (exit 1 when remediable drift exists).
+   read-only and CI-friendly (exit 1 when actionable drift exists: the kind
+   is allowlisted, the finding is not advisory and no override acknowledges
+   it; `detect.is_actionable` is the one predicate the exit code, the
+   ratchet and `review` share).
 3. **`remediate`** consumes those findings and applies a per-kind fix,
-   cascading template truth back into the derived models.
+   cascading template truth back into the derived models, in dependency
+   order (`remediate.PHASES`).
+
+Around the pipeline, `ratchet` keeps drift from rising, `audit` checks that
+applied fixes stayed applied, and `review` collects what only a human can
+decide.
 
 ### Safety gates (do not weaken these without discussion)
 
@@ -99,8 +115,13 @@ Three commands form a pipeline, and every design decision follows from it:
   every new file content passes `tmdl_edit.assert_tmdl_valid` before it
   touches disk, including the invariant that a property line is never
   injected into a DAX expression body (which would break every affected
-  measure fleet-wide). See the "safe TMDL surgery" explanation page in
-  `tmdl-drift-doctor-documentation`.
+  measure fleet-wide). See "Design: safe TMDL surgery" in the CLI and
+  configuration reference in `tmdl-drift-doctor-documentation`.
+- **Coupling guard and preconditions**: a retirement that derived-only work
+  depends on is `blocked` at detect time (`detect.coupling_blockers`), and
+  every fix's precondition (`remediate.PRECONDITIONS`) is evaluated at
+  apply time against the model as it is now plus what this run already did
+  (`RunState`). Never let a fix "succeed" by breaking a dependent.
 
 ## How to add a new drift kind
 
@@ -113,23 +134,27 @@ Work through these files in order:
    the top of the module: `REMEDIABLE_KINDS` (has an automated fix),
    `ADVISORY_KINDS` (report-only, never applied), and/or
    `RETIREMENT_FINDING_KINDS` (a deletion, automatically `--sync`-gated).
-   Stash any surgery-time extras on `Finding.data`.
+   Stash any surgery-time extras on `Finding.data`. Match objects by stable
+   identity (names, field signatures), never by GUID or lineage tag.
 2. **`tmdl_edit.py`**: if the fix needs a new text operation, add a *guarded*
    raw-block helper there. Splice raw blocks; never rebuild TMDL from parsed
    dataclasses. Make sure `assert_tmdl_valid` still accepts your output.
 3. **`remediate.py`**: write an applier `_apply_your_kind(fleet, f)` that
    returns `(label, [FileChange])` (a `FileChange` with `old=None` creates,
    `new=None` deletes) and register it in the `APPLIERS` dict. The engine
-   handles the allowlist, `--sync`, dry-run, and pre-write validation for
-   you; appliers must be **idempotent** (a second run finds nothing to do).
+   handles overrides, the allowlist, `--sync`, `blocked`, dry-run, and
+   pre-write validation for you; appliers must be **idempotent** (a second
+   run finds nothing to do). If the fix relies on something else existing,
+   add a precondition to `PRECONDITIONS` and place the kind in `PHASES`. If
+   an override should be able to acknowledge it, add it to
+   `overrides.SUPPRESSES`.
 4. **Fixtures + tests**: seed the new drift in `tests/fixtures/fleet/` (the
    fixture fleet doubles as the suite's readable specification) and add
    coverage under `tests/` (detection, allowlist gating, remediation,
    idempotence; safety-critical surgery goes in `tests/test_tmdl_edit_safety.py`).
 5. **Docs**: document the kind in the drift-kind catalog reference page in
-   `tmdl-drift-doctor-documentation`, add it to the drift-kinds table in
-   `README.md`, and add an explanation page there if it introduces new
-   behavior.
+   `tmdl-drift-doctor-documentation` (with a "do not cascade blindly when"
+   note), and add it to the drift-kinds table in `README.md`.
 
 ## Before you open a PR
 
@@ -142,7 +167,7 @@ pytest
 For changes that touch detection, remediation, or TMDL surgery, also exercise
 the CLI end-to-end against a fresh copy of the example fleet (`capture` →
 `detect` → `remediate --dry-run` → `remediate` → second `remediate` for
-idempotence → `ledger`) and confirm the output is what you expect. New
+idempotence → `ledger` → `audit`) and confirm the output is what you expect. New
 behavior needs new tests.
 
 ## Commit and PR conventions
