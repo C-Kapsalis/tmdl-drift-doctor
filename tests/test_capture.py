@@ -20,7 +20,9 @@ def test_capture_writes_baseline(fleet):
     assert set(baseline["tables"]) == {"Members", "Visits", "Classes",
                                        "Promotions", "Plan Map"}
     assert summary["tables"] == 5
-    assert summary["measures"] == 8
+    assert summary["measures"] == 9
+    assert summary["relationships"] == 3
+    assert len(baseline["relationships"]) == 3
     assert set(baseline["mapping_rows"]["Plan Map"]) == {
         "basic", "plus", "elite", "legacy-gold"}
     assert "Reporting Start Date" in baseline["expressions"]

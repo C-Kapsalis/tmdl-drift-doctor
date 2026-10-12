@@ -21,13 +21,20 @@ def test_all_seeded_kinds_detected(captured):
         ("measure.expression_drift", "Visits[Total Visits]"),
         ("measure.property_drift", "Visits[Avg Visit Duration]"),
         ("expression.drift", "Reporting Start Date"),
+        ("expression.drift", "Portal URL"),
+        ("measure.wrong_host", "Visits[Visits per Member]"),
         ("extra.measure", "Members[Alpha Loyalty Score]"),
+        ("extra.measure", "Classes[Alpha Seats Left]"),
     }
     assert _kinds(findings, "bravo") == {
         ("table.missing", "Classes"),
         ("column.missing", "Members[MembershipTier]"),
         ("column.property_drift", "Members[JoinDate]"),
         ("mapping_row.missing", "Plan Map/elite"),
+        ("measure.duplicate_host", "Members[Visits per Member]"),
+        ("relationship.missing", "Members[MembershipTier] -> Plan Map[PlanKey]"),
+        ("relationship.modified", "Visits[MemberId] -> Members[MemberId]"),
+        ("relationship.extra", "Members[JoinDate] -> Promotions[StartDate]"),
     }
 
 

@@ -7,3 +7,8 @@ expression 'Data Source' = "template-warehouse" meta [IsParameterQuery = true, T
 	lineageTag: 66666666-6666-4666-8666-000000000002
 
 	annotation PBI_ResultType = Text
+
+expression 'Portal URL' = "https://portal.gymchain.example/reports" meta [IsParameterQuery = true, Type = "Text", IsParameterQueryRequired = true]
+	lineageTag: 66666666-6666-4666-8666-000000000003
+
+	annotation PBI_ResultType = Text

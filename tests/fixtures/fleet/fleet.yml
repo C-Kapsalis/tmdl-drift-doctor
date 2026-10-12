@@ -16,11 +16,16 @@ allowlist:
     - measure.missing
     - measure.expression_drift
     - measure.property_drift
+    - measure.wrong_host
     - expression.drift
     - mapping_row.missing
+    - relationship.missing
+    - relationship.modified
     - retire.table
     - retire.column
     - retire.measure
     - retire.mapping_row
+    - retire.relationship
   expressions:
     - Reporting Start Date
+    - Portal URL

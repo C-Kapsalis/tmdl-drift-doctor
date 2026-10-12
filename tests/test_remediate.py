@@ -53,8 +53,9 @@ def test_remediation_is_idempotent(captured):
     _run(captured)
     findings = detect_fleet(captured, load_baseline(captured),
                             Ledger(captured.ledger_path))
-    # only the advisory extra remains — nothing remediable is left
-    assert {f.kind for f in findings} == {"extra.measure"}
+    # only advisories remain: nothing remediable is left
+    assert {f.kind for f in findings} == {
+        "extra.measure", "relationship.extra", "measure.duplicate_host"}
     second = _run(captured)
     assert second.count("applied") == 0
 

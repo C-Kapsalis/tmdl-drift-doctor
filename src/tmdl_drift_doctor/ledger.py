@@ -34,7 +34,8 @@ from typing import Optional
 
 from . import DriftDoctorError
 
-RETIREMENT_KINDS = ("table", "column", "measure", "mapping_row")
+RETIREMENT_KINDS = ("table", "column", "measure", "mapping_row",
+                    "relationship")
 
 
 def _now() -> str:
@@ -119,6 +120,10 @@ class Ledger:
 
     def is_retired(self, kind: str, ref: str, model: Optional[str] = None) -> bool:
         return (kind, ref) in self.active_retirements(model)
+
+    def remediations(self) -> list:
+        """Every ``remediated`` event, oldest first."""
+        return [e for e in self.entries() if e.get("event") == "remediated"]
 
     def retired_refs(self) -> set:
         """(kind, ref) pairs ever retired and not globally revived — used by

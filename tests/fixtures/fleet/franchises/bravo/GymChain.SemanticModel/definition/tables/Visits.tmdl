@@ -26,6 +26,12 @@ table Visits
 		summarizeBy: sum
 		sourceColumn: DurationMinutes
 
+	column PromoId
+		dataType: int64
+		lineageTag: 22222222-2222-4222-8222-000000000010
+		summarizeBy: none
+		sourceColumn: PromoId
+
 	measure 'Total Visits' = COUNTROWS(Visits)
 		formatString: #,0
 		lineageTag: 22222222-2222-4222-8222-000000000006
@@ -44,6 +50,10 @@ table Visits
 			```
 		formatString: #,0
 		lineageTag: 22222222-2222-4222-8222-000000000008
+
+	measure 'Visits per Member' = DIVIDE([Total Visits], [Active Members])
+		formatString: 0.00
+		lineageTag: 22222222-2222-4222-8222-000000000009
 
 	partition Visits = m
 		mode: import

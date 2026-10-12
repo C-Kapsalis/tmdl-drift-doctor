@@ -24,7 +24,11 @@ def test_recapture_records_all_retirement_kinds(captured):
         ("column", "Classes[Capacity]"),
         ("table", "Promotions"),
         ("mapping_row", "Plan Map/legacy-gold"),
+        ("relationship", "Visits[PromoId] -> Promotions[PromoId]"),
     }
+    # the table event records what the table held when it left the template
+    table_event = next(e for e in summary["retired"] if e["kind"] == "table")
+    assert "Promotions[PromoId]" in table_event["objects"]
     # objects of a dropped table are covered by the table entry — never
     # double-recorded
     assert ("measure", "Promotions[Active Promotions]") not in retired
@@ -56,16 +60,30 @@ def test_sync_cascades_retirements_and_is_idempotent(captured):
 
     alpha = parse_model(captured.model_definition("alpha"))
     assert alpha.measure("Visits", "Peak Hour Visits") is None
-    assert alpha.column("Classes", "Capacity") is None
     assert "Promotions" not in alpha.tables
     assert "Promotions" not in alpha.ref_tables
+    # the ledger-retired relationship went with its retired endpoint table
+    assert "Visits[PromoId] -> Promotions[PromoId]" not in alpha.relationships
+    assert "Visits[MemberId] -> Members[MemberId]" in alpha.relationships
     rows = parse_mapping_rows(alpha.tables["Plan Map"].partitions["Plan Map"].source)
     assert "legacy-gold" not in rows
     assert set(rows) == {"basic", "plus", "elite"}   # siblings kept
 
-    # idempotent: nothing retire.* left to do
-    remaining = [f for f in _detect(captured) if f.kind.startswith("retire.")]
-    assert remaining == []
+    # coupled retirements are refused, never forced:
+    # alpha's own 'Alpha Seats Left' still reads Classes[Capacity] ...
+    assert alpha.column("Classes", "Capacity") is not None
+    # ... and bravo's own relationship still points into Promotions
+    bravo = parse_model(captured.model_definition("bravo"))
+    assert "Promotions" in bravo.tables
+    blocked = {(o.finding.model, o.finding.ref) for o in result.outcomes
+               if o.status == "blocked"}
+    assert blocked == {("alpha", "Classes[Capacity]"), ("bravo", "Promotions")}
+
+    # idempotent: only the blocked retirements are left
+    remaining = {(f.model, f.ref) for f in _detect(captured)
+                 if f.kind.startswith("retire.")}
+    assert remaining == blocked
+    assert remediate(captured, _detect(captured), sync=True).count("applied") == 0
 
 
 def test_retirements_require_sync(captured):

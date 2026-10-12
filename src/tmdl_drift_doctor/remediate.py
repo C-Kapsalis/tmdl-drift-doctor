@@ -1,34 +1,53 @@
-"""Remediation engine — cascade template truth into derived models.
+"""Remediation engine: cascade template truth into derived models.
 
-Consumes ``detect``'s findings and applies a fix per kind, honoring three
+Consumes ``detect``'s findings and applies a fix per kind, honoring these
 gates in order:
 
-1. **the allowlist** — a kind the fleet's allowlist does not name is never
+1. **overrides**: a finding a fleet.yml override acknowledges is never
+   applied (it prints as an ACK instead);
+2. **the allowlist**: a kind the fleet's allowlist does not name is never
    applied, however real the drift;
-2. **the sync gate** — ``retire.*`` kinds (the only deletions) additionally
+3. **the sync gate**: ``retire.*`` kinds (the only deletions) additionally
    require ``--sync``; a default run is purely additive/overwriting;
-3. **the write guards** — every new file content passes
+4. **the coupling guard**: a retirement that derived-only work still depends
+   on is ``blocked`` (decided at detect time, routed to a human);
+5. **preconditions**: each fix declares what must already be true in the
+   derived model when it runs (relationship endpoints exist, the columns and
+   measures an inserted measure references exist or are being added in this
+   run, ...). They are evaluated at apply time, after the fixes earlier in
+   the same run; an unmet one is ``auto_skipped_precondition``, and
+   ``--converge`` re-detects and re-applies until nothing changes;
+6. **the write guards**: every new file content passes
    ``tmdl_edit.assert_tmdl_valid`` (which includes the never-inject-into-DAX
    invariant) before it touches disk.
 
+Fixes run in dependency order (tables, columns, expressions, mapping rows,
+measures, relationships, then retirements), so one pass usually suffices.
+
 ``--dry-run`` computes every edit and renders unified diffs without writing
-anything — including the ledger. Applied actions are recorded in the ledger;
+anything, including the ledger. Applied actions are recorded in the ledger;
 all appliers are idempotent (a second run finds nothing to do).
 """
 
 from __future__ import annotations
 
 import difflib
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 from . import DriftDoctorError, TmdlEditError
 from . import tmdl_edit as te
-from .detect import Finding, RETIREMENT_FINDING_KINDS
+from .detect import (
+    Finding,
+    RETIREMENT_FINDING_KINDS,
+    dependents,
+    split_ref,
+)
 from .fleet import Fleet
 from .ledger import Ledger
-
+from .tmdl import Model, dax_references, parse_model, parse_signature
 
 @dataclass
 class FileChange:
@@ -49,7 +68,8 @@ class FileChange:
 @dataclass
 class Outcome:
     finding: Finding
-    status: str            # applied | would-apply | skipped | failed
+    status: str            # applied | would-apply | skipped | failed |
+                           # blocked | auto_skipped_precondition | overridden
     reason: str = ""
     changes: list = field(default_factory=list)
 
@@ -72,6 +92,7 @@ def _model_paths(fleet: Fleet, f: Finding) -> tuple:
 
 
 def _table_file(definition: Path, table: str) -> Path:
+    """The table's file, under the template's naming convention."""
     p = definition / "tables" / f"{table}.tmdl"
     if not p.exists():
         raise DriftDoctorError(
@@ -81,8 +102,7 @@ def _table_file(definition: Path, table: str) -> Path:
     return p
 
 
-def _split_ref(ref: str) -> tuple:
-    return ref[:ref.rindex("[")], ref[ref.rindex("[") + 1:-1]
+_split_ref = split_ref
 
 
 def _apply_table_missing(fleet: Fleet, f: Finding) -> tuple:
@@ -193,7 +213,28 @@ def _apply_retire_column(fleet: Fleet, f: Finding) -> tuple:
         raise DriftDoctorError(
             f"column {f.ref} is no longer present in {d_file} — the model "
             f"changed after detection. Re-run `drift-doctor detect`.")
-    return ("remove retired column block", [FileChange(d_file, d_content, new)])
+    changes = [FileChange(d_file, d_content, new)]
+    changes += _sweep_relationships(derived, f)
+    label = "remove retired column block"
+    if len(changes) > 1:
+        label += " + its template-owned/retired relationships"
+    return (label, changes)
+
+
+def _sweep_relationships(derived: Path, f: Finding) -> list:
+    """Remove the relationships detection marked as going WITH a retired
+    table/column (template-owned or ledger-retired ones only)."""
+    sigs = f.data.get("sweep_relationships") or []
+    rel_file = derived / "relationships.tmdl"
+    if not sigs or not rel_file.exists():
+        return []
+    old = rel_file.read_text(encoding="utf-8")
+    new = old
+    for sig in sigs:
+        out = te.remove_relationship_block(new, sig)
+        if out is not None:
+            new = out
+    return [FileChange(rel_file, old, new)] if new != old else []
 
 
 def _apply_retire_table(fleet: Fleet, f: Finding) -> tuple:
@@ -205,7 +246,12 @@ def _apply_retire_table(fleet: Fleet, f: Finding) -> tuple:
     changes = [FileChange(d_file, d_file.read_text(encoding="utf-8"), None)]
     if model_new != model_old:
         changes.append(FileChange(model_file, model_old, model_new))
-    return ("remove retired table file + deregister from model.tmdl", changes)
+    swept = _sweep_relationships(derived, f)
+    changes += swept
+    label = "remove retired table file + deregister from model.tmdl"
+    if swept:
+        label += " + its template-owned/retired relationships"
+    return (label, changes)
 
 
 def _apply_retire_mapping_row(fleet: Fleet, f: Finding) -> tuple:
@@ -222,6 +268,90 @@ def _apply_retire_mapping_row(fleet: Fleet, f: Finding) -> tuple:
             [FileChange(d_file, d_content, new)])
 
 
+def _apply_measure_wrong_host(fleet: Fleet, f: Finding) -> tuple:
+    """Move the derived model's OWN block verbatim to the template's host.
+    The DAX and lineage tag are untouched (same object, same identity); if
+    the body also differs, that surfaces as ordinary expression drift on the
+    next detect, once the hosts match. The destination is written FIRST, so
+    an interruption leaves a detectable duplicate, never a lost measure."""
+    derived, _ = _model_paths(fleet, f)
+    name = f.data["measure"]
+    src_file = _table_file(derived, f.data["from_table"])
+    dst_file = _table_file(derived, f.data["to_table"])
+    src = src_file.read_text(encoding="utf-8")
+    dst = dst_file.read_text(encoding="utf-8")
+    block = te.extract_block(src, "measure", name)
+    if block is None:
+        raise DriftDoctorError(
+            f"measure '{name}' is no longer on '{f.data['from_table']}': the "
+            f"model changed after detection. Re-run `drift-doctor detect`.")
+    new_src = te.remove_block(src, "measure", name)
+    new_dst = te.insert_measure_block(dst, block)
+    return (f"move measure block verbatim from '{f.data['from_table']}' to "
+            f"the template's host '{f.data['to_table']}' (DAX and lineage "
+            f"tag untouched)",
+            [FileChange(dst_file, dst, new_dst),
+             FileChange(src_file, src, new_src)])
+
+
+def _template_relationship_block(fleet: Fleet, sig: str) -> str:
+    t_file = fleet.template_definition / "relationships.tmdl"
+    content = t_file.read_text(encoding="utf-8") if t_file.exists() else ""
+    block = te.extract_relationship_block(content, sig)
+    if block is None:
+        raise DriftDoctorError(
+            f"template relationships.tmdl no longer defines {sig}; the "
+            f"baseline is stale. Run `drift-doctor capture`.")
+    return block
+
+
+def _apply_relationship_missing(fleet: Fleet, f: Finding) -> tuple:
+    derived, _ = _model_paths(fleet, f)
+    block = _template_relationship_block(fleet, f.ref)
+    d_file = derived / "relationships.tmdl"
+    old = d_file.read_text(encoding="utf-8") if d_file.exists() else None
+    content = old or ""
+    if te.relationship_span(content, f.ref) is not None:
+        return ("relationship already present", [])
+    name = block.split("\n", 1)[0].split(None, 1)[1].strip()
+    label = "append relationship block from template"
+    if name in te.relationship_names(content):
+        block = te.set_relationship_name(block, str(uuid.uuid4()))
+        label += " (fresh name: the template's collides)"
+    return (label, [FileChange(d_file, old,
+                               te.append_relationship_block(content, block))])
+
+
+def _apply_relationship_modified(fleet: Fleet, f: Finding) -> tuple:
+    derived, _ = _model_paths(fleet, f)
+    block = _template_relationship_block(fleet, f.ref)
+    d_file = derived / "relationships.tmdl"
+    content = d_file.read_text(encoding="utf-8")
+    existing = te.extract_relationship_block(content, f.ref)
+    if existing is None:
+        raise DriftDoctorError(
+            f"relationship {f.ref} is no longer in {d_file}: the model "
+            f"changed after detection. Re-run `drift-doctor detect`.")
+    name = existing.split("\n", 1)[0].split(None, 1)[1].strip()
+    new = te.replace_relationship_block(
+        content, f.ref, te.set_relationship_name(block, name))
+    return ("overwrite relationship properties from template (block name "
+            "kept)", [FileChange(d_file, content, new)])
+
+
+def _apply_retire_relationship(fleet: Fleet, f: Finding) -> tuple:
+    derived, _ = _model_paths(fleet, f)
+    d_file = derived / "relationships.tmdl"
+    content = d_file.read_text(encoding="utf-8")
+    new = te.remove_relationship_block(content, f.ref)
+    if new is None:
+        raise DriftDoctorError(
+            f"relationship {f.ref} is no longer in {d_file}: the model "
+            f"changed after detection. Re-run `drift-doctor detect`.")
+    return ("remove retired relationship block",
+            [FileChange(d_file, content, new)])
+
+
 APPLIERS: dict = {
     "table.missing": _apply_table_missing,
     "column.missing": _apply_column,
@@ -229,6 +359,10 @@ APPLIERS: dict = {
     "measure.missing": _apply_measure,
     "measure.expression_drift": _apply_measure,
     "measure.property_drift": _apply_measure,
+    "measure.wrong_host": _apply_measure_wrong_host,
+    "relationship.missing": _apply_relationship_missing,
+    "relationship.modified": _apply_relationship_modified,
+    "retire.relationship": _apply_retire_relationship,
     "expression.drift": _apply_expression,
     "mapping_row.missing": _apply_mapping_row_missing,
     "retire.table": _apply_retire_table,
@@ -238,16 +372,220 @@ APPLIERS: dict = {
 }
 
 
+# ───────────────────────── run state ─────────────────────────
+
+class RunState:
+    """What one remediation run has done (or, in a dry run, would have done)
+    so far. Preconditions consult it so a fix can rely on an earlier fix in
+    the same run, whether or not anything was written to disk."""
+
+    def __init__(self, fleet: Fleet, baseline: dict):
+        self.fleet = fleet
+        self.baseline = baseline
+        self.added: set = set()        # ("table"|"column"|"measure"|"relationship", ref)
+        self.measure_names: set = set()  # measure names added anywhere
+        self.removed: set = set()      # ("table"|"column"|"measure"|..., ref)
+        self.overwritten: set = set()  # refs whose block was overwritten
+        self._models: dict = {}
+
+    def model(self, name: str) -> Model:
+        if name not in self._models:
+            self._models[name] = parse_model(self.fleet.model_definition(name))
+        return self._models[name]
+
+    def invalidate(self, name: str) -> None:
+        self._models.pop(name, None)
+
+    def record(self, f: Finding) -> None:
+        kind = f.kind
+        b_tables = self.baseline.get("tables") or {}
+        if kind == "table.missing":
+            self.added.add(("table", f.ref))
+            body = b_tables.get(f.ref) or {}
+            for c in body.get("columns") or {}:
+                self.added.add(("column", f"{f.ref}[{c}]"))
+            for m in body.get("measures") or {}:
+                self.added.add(("measure", f"{f.ref}[{m}]"))
+                self.measure_names.add(m)
+        elif kind == "column.missing":
+            self.added.add(("column", f.ref))
+        elif kind in ("measure.missing", "measure.wrong_host"):
+            self.added.add(("measure", f.ref))
+            self.measure_names.add(split_ref(f.ref)[1])
+        elif kind == "relationship.missing":
+            self.added.add(("relationship", f.ref))
+        elif kind in ("measure.expression_drift", "measure.property_drift",
+                      "column.property_drift"):
+            self.overwritten.add(f.ref)
+        elif kind.startswith("retire."):
+            self.removed.add((kind.split(".", 1)[1], f.ref))
+            for sig in f.data.get("sweep_relationships") or ():
+                self.removed.add(("relationship", sig))
+
+    # ── presence, counting what this run added ──
+    def has_table(self, model: str, table: str) -> bool:
+        return table in self.model(model).tables or ("table", table) in self.added
+
+    def has_column(self, model: str, table: str, col: str) -> bool:
+        return (self.model(model).column(table, col) is not None
+                or ("column", f"{table}[{col}]") in self.added)
+
+    def has_object(self, model: str, table: str, name: str) -> bool:
+        m = self.model(model)
+        return (m.column(table, name) is not None
+                or m.measure(table, name) is not None
+                or ("column", f"{table}[{name}]") in self.added
+                or ("measure", f"{table}[{name}]") in self.added)
+
+    def has_bare(self, model: str, name: str) -> bool:
+        m = self.model(model)
+        if name in m.measure_hosts() or name in self.measure_names:
+            return True
+        if any(name in t.columns for t in m.tables.values()):
+            return True
+        return any(k == "column" and split_ref(r)[1] == name
+                   for k, r in self.added)
+
+
+# ───────────────────────── preconditions ─────────────────────────
+# Each returns None when the fix may run, else the reason it may not (yet).
+
+def _pre_table_missing(state: RunState, f: Finding) -> Optional[str]:
+    body = (state.baseline.get("tables") or {}).get(f.ref) or {}
+    hosts = state.model(f.model).measure_hosts()
+    clash = sorted(f"{h}[{m}]" for m in (body.get("measures") or {})
+                   for h in hosts.get(m, []))
+    if clash:
+        return ("copying the table would duplicate measure name(s) already "
+                "in the model: " + ", ".join(clash)
+                + " (measure names are model-global; move or remove them "
+                  "first)")
+    return None
+
+
+def _pre_measure_refs(state: RunState, f: Finding) -> Optional[str]:
+    """Every column/measure/table the template DAX references must exist
+    in the derived model or be added earlier in this run."""
+    table, name = split_ref(f.ref)
+    body = ((state.baseline.get("tables") or {}).get(table) or {})
+    expr = ((body.get("measures") or {}).get(name) or {}).get("expression", "")
+    refs = dax_references(expr)
+    known_tables = set(state.baseline.get("tables") or {}) | set(
+        state.model(f.model).tables)
+    missing = []
+    for t, n in sorted(refs["qualified"]):
+        if not state.has_object(f.model, t, n):
+            missing.append(f"{t}[{n}]")
+    for n in sorted(refs["bare"]):
+        if n != name and not state.has_bare(f.model, n):
+            missing.append(f"[{n}]")
+    for t in sorted(refs["tables"] & known_tables):
+        if not state.has_table(f.model, t):
+            missing.append(f"table '{t}'")
+    if missing:
+        return ("the template DAX references object(s) the model lacks and "
+                "this run is not adding: " + ", ".join(dict.fromkeys(missing)))
+    return None
+
+
+def _pre_wrong_host(state: RunState, f: Finding) -> Optional[str]:
+    src, dst, name = f.data["from_table"], f.data["to_table"], f.data["measure"]
+    m = state.model(f.model)
+    if dst not in m.tables:
+        return (f"the template's host table '{dst}' is not in the model yet "
+                f"(fix table.missing first)")
+    if m.measure(dst, name) is not None:
+        return (f"'{dst}' already carries '{name}': a duplicate, not a move "
+                f"(see measure.duplicate_host)")
+    needle = (src, name)
+    for t in m.tables.values():
+        for obj in list(t.measures.values()) + list(t.columns.values()):
+            if needle in dax_references(getattr(obj, "expression", ""))["qualified"]:
+                return (f"{t.name}[{obj.name}] references '{src}'[{name}] by "
+                        f"its old host; moving would leave that reference "
+                        f"dangling. Rewrite it as [{name}] first")
+    return None
+
+
+def _pre_relationship_endpoints(state: RunState, f: Finding) -> Optional[str]:
+    ft, fc, tt, tc = parse_signature(f.ref)
+    missing = [f"{t}[{c}]" for t, c in ((ft, fc), (tt, tc))
+               if not state.has_column(f.model, t, c)]
+    if missing:
+        return ("relationship endpoint(s) not in the model and not being "
+                "added in this run: " + ", ".join(missing))
+    return None
+
+
+def _pre_retirement(state: RunState, f: Finding) -> Optional[str]:
+    """Re-check, on the model as it is NOW, that nothing still depends on the
+    object: template-owned dependents must have been fixed (or be fixed
+    earlier in this run), ledger-retired ones removed."""
+    target_kind = f.kind.split(".", 1)[1]
+    deps = dependents(state.model(f.model), target_kind, f.ref)
+    sweep = set(f.data.get("sweep_relationships") or ())
+    left = [ref for kind, ref in deps["definitions"]
+            if (kind, ref) not in state.removed
+            and ("table", split_ref(ref)[0]) not in state.removed
+            and ref not in state.overwritten]
+    left += [sig for sig in deps["relationships"]
+             if sig not in sweep and ("relationship", sig) not in state.removed]
+    left += deps["sort_by"] + deps["hierarchies"]
+    if left:
+        return ("still referenced by " + ", ".join(sorted(left))
+                + "; their own fixes must land first (cascade them, then "
+                  "re-run, or use --converge)")
+    return None
+
+
+PRECONDITIONS: dict = {
+    "table.missing": _pre_table_missing,
+    "measure.missing": _pre_measure_refs,
+    "measure.expression_drift": _pre_measure_refs,
+    "measure.wrong_host": _pre_wrong_host,
+    "relationship.missing": _pre_relationship_endpoints,
+    "retire.table": _pre_retirement,
+    "retire.column": _pre_retirement,
+    "retire.measure": _pre_retirement,
+}
+
+# Dependency order: what later fixes rely on comes first.
+PHASES = (
+    "table.missing", "column.missing", "column.property_drift",
+    "expression.drift", "mapping_row.missing", "measure.missing",
+    "measure.wrong_host", "measure.expression_drift", "measure.property_drift",
+    "relationship.missing", "relationship.modified",
+    "retire.relationship", "retire.measure", "retire.mapping_row",
+    "retire.column", "retire.table",
+)
+
+
+def _phase(f: Finding) -> int:
+    return PHASES.index(f.kind) if f.kind in PHASES else len(PHASES)
+
+
 # ───────────────────────── engine ─────────────────────────
 
 def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
               dry_run: bool = False, sync: bool = False,
-              ledger: Optional[Ledger] = None) -> RunResult:
+              ledger: Optional[Ledger] = None,
+              baseline: Optional[dict] = None) -> RunResult:
     ledger = ledger or Ledger(fleet.ledger_path)
+    if baseline is None:
+        from .baseline import load_baseline
+        baseline = load_baseline(fleet)
+    state = RunState(fleet, baseline)
     result = RunResult()
 
-    for f in findings:
+    for f in sorted(findings, key=_phase):
         if kind and not f.kind.startswith(kind):
+            continue
+        if f.overridden:
+            o = f.override
+            result.outcomes.append(Outcome(
+                f, "overridden",
+                f"acknowledged by a fleet.yml override ({o.kind}): {o.reason}"
+                f" [owner {o.owner or '?'}, added {o.added or '?'}]"))
             continue
         if f.advisory:
             result.outcomes.append(Outcome(
@@ -275,21 +613,38 @@ def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
                 "retirement removals require --sync (deletions never run in "
                 "a default pass) — re-run with --sync to apply this removal"))
             continue
+        if f.blocked:
+            result.outcomes.append(Outcome(
+                f, "blocked",
+                "derived work depends on it: " + "; ".join(f.blocked)
+                + ". Decide by hand: remove or rewrite the dependent, or "
+                  "keep the object with a `retain` override or a ledger "
+                  "revival."))
+            continue
 
         try:
+            pre = PRECONDITIONS.get(f.kind)
+            reason = pre(state, f) if pre else None
+            if reason:
+                result.outcomes.append(Outcome(f, "auto_skipped_precondition",
+                                               reason))
+                continue
             label, changes = APPLIERS[f.kind](fleet, f)
             for c in changes:
                 if c.new is not None and c.path.suffix == ".tmdl":
                     te.assert_tmdl_valid(c.new)   # guard BEFORE any write
             if dry_run:
+                state.record(f)
                 result.outcomes.append(Outcome(f, "would-apply", label, changes))
                 continue
-            for c in changes:
+            for c in changes:   # in order: a move writes its destination first
                 if c.new is None:
                     c.path.unlink()
                 else:
                     c.path.parent.mkdir(parents=True, exist_ok=True)
                     c.path.write_text(c.new, encoding="utf-8")
+            state.invalidate(f.model)
+            state.record(f)
             ledger.record_remediation(
                 f.kind, f.model, f.ref, label,
                 files=[str(c.path) for c in changes])
@@ -298,3 +653,20 @@ def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
             result.outcomes.append(Outcome(f, "failed", str(e)))
 
     return result
+
+
+MAX_PASSES = 4
+
+
+def remediate_converge(fleet: Fleet, detect: Callable[[], list], *,
+                       max_passes: int = MAX_PASSES, **kw) -> list:
+    """Re-detect and re-apply until a pass applies nothing (a fixed point)
+    or `max_passes` passes ran. Returns one RunResult per pass. A dry run
+    cannot converge (nothing changes on disk), so it is always one pass."""
+    results = []
+    for _ in range(max_passes):
+        res = remediate(fleet, detect(), **kw)
+        results.append(res)
+        if kw.get("dry_run") or res.count("applied") == 0 or res.count("failed"):
+            break
+    return results

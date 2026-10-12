@@ -108,3 +108,18 @@ def test_ledger_show_and_revive(fleet_dir):
     r = _invoke(fleet_dir, "ledger", "--revive", "Nope[Nothing]",
                 "--kind", "measure")
     assert r.exit_code != 0
+
+
+def test_remediate_converge_reports_passes(fleet_dir):
+    _invoke(fleet_dir, "capture")
+    r = _invoke(fleet_dir, "remediate", "--converge")
+    assert r.exit_code == 0, r.output
+    assert "══ pass 1" in r.output and "converged" in r.output
+    assert _invoke(fleet_dir, "detect").exit_code == 0
+
+
+def test_remediate_summary_names_every_status(fleet_dir):
+    _invoke(fleet_dir, "capture")
+    r = _invoke(fleet_dir, "remediate", "--dry-run")
+    for status in ("blocked=", "auto_skipped_precondition=", "overridden="):
+        assert status in r.output

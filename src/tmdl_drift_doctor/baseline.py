@@ -10,9 +10,12 @@ longer carries it — or crash trying.
 Capture is also the retirement maintainer: anything present in the PREVIOUS
 committed baseline but absent from the fresh snapshot was retired from the
 template, and is appended to the ledger (kinds: table, column, measure,
-mapping_row). Objects covered by a larger retirement are not double-recorded
-(a column or measure whose whole table was dropped is covered by the table
-entry; a mapping row whose whole table was dropped likewise). An object that
+mapping_row, relationship). Objects covered by a larger retirement are not
+double-recorded (a column or measure whose whole table was dropped is covered
+by the table entry; a mapping row whose whole table was dropped likewise).
+Relationships are the exception: they live in their own file, and the ledger
+entry is what later authorizes ``retire.table``/``retire.column`` to sweep
+them out of a derived model, so a dropped relationship is always recorded. An object that
 RETURNED to the template gets a ``revived`` stamp instead of having its
 history erased.
 """
@@ -28,7 +31,7 @@ from .fleet import Fleet
 from .ledger import Ledger
 from .tmdl import Model, normalize_expression, parse_mapping_rows, parse_model
 
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2
 
 
 def build_snapshot(model: Model, mapping_tables: list) -> dict:
@@ -54,6 +57,8 @@ def build_snapshot(model: Model, mapping_tables: list) -> dict:
         "tables": tables,
         "expressions": dict(sorted(model.expressions.items())),
         "mapping_rows": mapping_rows,
+        "relationships": {sig: dict(rel.properties)
+                          for sig, rel in sorted(model.relationships.items())},
     }
 
 
@@ -73,6 +78,13 @@ def load_baseline(fleet: Fleet) -> dict:
 def ensure_baseline_fresh(fleet: Fleet, baseline: dict) -> None:
     """Raise StaleBaselineError if the live template no longer matches the
     committed baseline. Acting on a stale baseline misclassifies drift."""
+    if baseline.get("version") != SNAPSHOT_VERSION:
+        raise StaleBaselineError(
+            f"the committed baseline uses snapshot format "
+            f"{baseline.get('version')!r}, and this drift-doctor writes "
+            f"format {SNAPSHOT_VERSION} (it now also records relationships "
+            f"and normalizes expressions differently). Run `drift-doctor "
+            f"capture` once to upgrade it; the ledger is kept as is.")
     live = build_snapshot(parse_model(fleet.template_definition),
                           fleet.mapping_tables)
     if _comparable(live) != _comparable(baseline):
@@ -94,6 +106,7 @@ def kind_inventory(snapshot: dict) -> dict:
     * column       — ``Table[Column]``
     * measure      — ``Table[Measure]``
     * mapping_row  — ``Table/row_key``
+    * relationship — ``From[col] -> To[col]``
     """
     tables = snapshot.get("tables") or {}
     return {
@@ -105,6 +118,7 @@ def kind_inventory(snapshot: dict) -> dict:
         "mapping_row": {f"{t}/{k}"
                         for t, rows in (snapshot.get("mapping_rows") or {}).items()
                         for k in rows},
+        "relationship": set(snapshot.get("relationships") or {}),
     }
 
 
@@ -128,15 +142,21 @@ def update_retirements(prev: dict, fresh: dict, ledger: Ledger) -> dict:
     dropped_tables = prev_inv["table"] - fresh_inv["table"]
 
     retired = []
-    for kind in ("table", "column", "measure", "mapping_row"):
+    for kind in ("table", "column", "measure", "mapping_row", "relationship"):
         for ref in sorted(prev_inv[kind] - fresh_inv[kind]):
             if (kind, ref) in known:
                 continue
             # an object whose whole table was dropped is covered by the
             # table's own retirement entry — never double-record it
-            if kind != "table" and _host_table(kind, ref) in dropped_tables:
+            if (kind not in ("table", "relationship")
+                    and _host_table(kind, ref) in dropped_tables):
                 continue
             extra = {}
+            if kind == "table":
+                body = (prev.get("tables") or {}).get(ref) or {}
+                extra = {"objects": sorted(
+                    [f"{ref}[{c}]" for c in (body.get("columns") or {})]
+                    + [f"{ref}[{m}]" for m in (body.get("measures") or {})])}
             if kind == "mapping_row":
                 table, key = ref.rsplit("/", 1)
                 extra = {"table": table, "row_key": key}
@@ -179,6 +199,7 @@ def capture(fleet: Fleet) -> dict:
         "measures": len(inv["measure"]),
         "mapping_rows": len(inv["mapping_row"]),
         "expressions": len(fresh.get("expressions") or {}),
+        "relationships": len(inv["relationship"]),
         "retired": changes["retired"],
         "revived": changes["revived"],
     }

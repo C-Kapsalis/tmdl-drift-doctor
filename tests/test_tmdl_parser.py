@@ -55,7 +55,8 @@ def test_lineage_tags_excluded_from_properties(fleet):
 
 def test_expressions_file(fleet):
     model = parse_model(fleet.template_definition)
-    assert set(model.expressions) == {"Reporting Start Date", "Data Source"}
+    assert set(model.expressions) == {"Reporting Start Date", "Data Source",
+                                     "Portal URL"}
     assert "#date(2024, 1, 1)" in model.expressions["Reporting Start Date"]
     assert "lineageTag" not in model.expressions["Reporting Start Date"]
 

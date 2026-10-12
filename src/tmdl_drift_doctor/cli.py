@@ -1,10 +1,13 @@
-"""drift-doctor — the command-line interface.
+"""drift-doctor: the command-line interface.
 
     drift-doctor capture   --fleet fleet.yml
     drift-doctor detect    --fleet fleet.yml [--json] [--model NAME] [--kind PFX]
-    drift-doctor remediate --fleet fleet.yml [--kind PFX] [--dry-run] [--sync]
+    drift-doctor remediate --fleet fleet.yml [--kind PFX] [--dry-run] [--sync] [--converge]
     drift-doctor ledger    --fleet fleet.yml [--json]
     drift-doctor ledger    --fleet fleet.yml --revive REF --kind KIND [--model NAME]
+
+Exit codes: 0 success / clean; 1 actionable drift, a failed fix, or a
+usage/config error; 3 a model that could not be parsed.
 """
 
 from __future__ import annotations
@@ -17,10 +20,14 @@ import click
 from . import DriftDoctorError, StaleBaselineError, __version__
 from .baseline import capture as run_capture
 from .baseline import ensure_baseline_fresh, load_baseline
-from .detect import detect_fleet
+from .detect import build_report, detect_fleet, is_actionable, is_gating
 from .fleet import load_fleet
 from .ledger import RETIREMENT_KINDS, Ledger
+from .overrides import format_ack
 from .remediate import remediate as run_remediate
+from .remediate import remediate_converge
+
+PARSE_ERROR_EXIT = 3
 
 
 def _fleet_option(fn):
@@ -43,6 +50,14 @@ def _fresh_baseline(fleet, allow_stale: bool):
             ensure_baseline_fresh(fleet, baseline)
         return baseline
     except StaleBaselineError as e:
+        raise click.ClickException(str(e))
+
+
+def _detect(fleet, baseline, errors=None, **kw):
+    try:
+        return detect_fleet(fleet, baseline, Ledger(fleet.ledger_path),
+                            errors=errors, **kw)
+    except DriftDoctorError as e:
         raise click.ClickException(str(e))
 
 
@@ -73,6 +88,7 @@ def capture(fleet_path) -> None:
     click.echo(f"baseline written: {summary['baseline']}")
     click.echo(f"  tables={summary['tables']} columns={summary['columns']} "
                f"measures={summary['measures']} "
+               f"relationships={summary['relationships']} "
                f"mapping_rows={summary['mapping_rows']} "
                f"expressions={summary['expressions']}")
     for e in summary["retired"]:
@@ -84,7 +100,8 @@ def capture(fleet_path) -> None:
 
 @main.command()
 @_fleet_option
-@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable report (schema version 2).")
 @click.option("--model", "model_filter", default=None,
               help="Only this derived model.")
 @click.option("--kind", "kind_filter", default=None,
@@ -95,39 +112,74 @@ def capture(fleet_path) -> None:
 def detect(fleet_path, as_json, model_filter, kind_filter, allow_stale) -> None:
     """Detect drift in every derived model. Read-only.
 
-    Exit code 1 when remediable findings exist (advisories alone exit 0) —
-    wire it straight into CI."""
+    Exit code 1 when actionable findings exist (allowlisted, not advisory,
+    not overridden, on a model whose gating is not advisory); 3 when a model
+    could not be parsed. Wire it straight into CI."""
     fleet = _load(fleet_path)
     baseline = _fresh_baseline(fleet, allow_stale)
-    findings = detect_fleet(fleet, baseline, Ledger(fleet.ledger_path),
-                            model_filter=model_filter, kind_filter=kind_filter)
+    errors: list = []
+    findings = _detect(fleet, baseline, errors, model_filter=model_filter,
+                       kind_filter=kind_filter)
     if as_json:
-        click.echo(json.dumps([f.to_dict() for f in findings], indent=2))
+        click.echo(json.dumps(build_report(fleet, findings, errors,
+                                           model_filter, kind_filter),
+                              indent=2, ensure_ascii=False))
     else:
-        if not findings:
-            scope = []
-            if model_filter:
-                scope.append(f"model '{model_filter}'")
-            if kind_filter:
-                scope.append(f"kind prefix '{kind_filter}'")
-            if scope:
-                click.echo(f"no drift detected within {' and '.join(scope)} "
-                           f"— other findings may exist outside this filter.")
-            else:
-                click.echo("no drift detected — the fleet matches the template.")
-        by_model: dict = {}
-        for f in findings:
-            by_model.setdefault(f.model, []).append(f)
-        for model, items in by_model.items():
-            click.echo(f"\n── {model}: {len(items)} finding(s)")
-            for f in items:
-                tag = "  [advisory]" if f.advisory else ""
-                click.echo(f"  {f.kind:<28} {f.ref}{tag}")
-                if f.template_value is not None or f.derived_value is not None:
-                    click.echo(f"      template: {f.template_value}")
-                    click.echo(f"      derived:  {f.derived_value}")
-    if any(not f.advisory for f in findings):
+        _print_findings(fleet, findings, errors, model_filter, kind_filter)
+    if errors:
+        sys.exit(PARSE_ERROR_EXIT)
+    if any(is_gating(f, fleet) for f in findings):
         sys.exit(1)
+
+
+def _print_findings(fleet, findings, errors, model_filter, kind_filter):
+    shown = [f for f in findings if not f.overridden]
+    if not shown and not errors:
+        scope = []
+        if model_filter:
+            scope.append(f"model '{model_filter}'")
+        if kind_filter:
+            scope.append(f"kind prefix '{kind_filter}'")
+        if scope:
+            click.echo(f"no drift detected within {' and '.join(scope)} "
+                       f"— other findings may exist outside this filter.")
+        else:
+            click.echo("no drift detected — the fleet matches the template.")
+    by_model: dict = {}
+    for f in findings:
+        by_model.setdefault(f.model, []).append(f)
+    for model, items in by_model.items():
+        visible = [f for f in items if not f.overridden]
+        acks = [f for f in items if f.overridden]
+        gating = "  (gating: advisory)" if fleet.is_advisory(model) else ""
+        click.echo(f"\n── {model}: {len(visible)} finding(s){gating}")
+        for f in visible:
+            tags = []
+            if f.advisory:
+                tags.append("[advisory]")
+            elif f.kind not in fleet.allowlist_kinds:
+                tags.append("[not allowlisted]")
+            if f.blocked:
+                tags.append("[blocked]")
+            tag = ("  " + " ".join(tags)) if tags else ""
+            click.echo(f"  {f.kind:<28} {f.ref}{tag}")
+            if f.template_value is not None or f.derived_value is not None:
+                click.echo(f"      template: {f.template_value}")
+                click.echo(f"      derived:  {f.derived_value}")
+            for reason in f.blocked:
+                click.echo(f"      blocked:  {reason}")
+        if acks:
+            click.echo(f"  declared divergence honored (overrides): "
+                       f"{len(acks)} item(s)")
+            for f in acks:
+                click.echo(format_ack(f, f.override))
+    for e in errors:
+        click.echo(f"\n[ERROR] {e['model']}: {e['error']}", err=True)
+    actionable = sum(1 for f in findings if is_actionable(f, fleet))
+    click.echo(f"\n── summary: actionable={actionable} "
+               f"advisory={sum(1 for f in findings if f.advisory)} "
+               f"overridden={sum(1 for f in findings if f.overridden)} "
+               f"errors={len(errors)}")
 
 
 @main.command()
@@ -140,18 +192,44 @@ def detect(fleet_path, as_json, model_filter, kind_filter, allow_stale) -> None:
 @click.option("--sync", is_flag=True,
               help="Also apply retire.* removals (deletions of provably "
                    "ex-template objects). Never on by default.")
+@click.option("--converge", is_flag=True,
+              help="Re-detect and re-apply until a pass changes nothing "
+                   "(at most 4 passes).")
 @click.option("--model", "model_filter", default=None,
               help="Only this derived model.")
 @click.option("--allow-stale", is_flag=True,
               help="Proceed on a stale baseline (misclassification risk).")
-def remediate(fleet_path, kind, dry_run, sync, model_filter, allow_stale) -> None:
+def remediate(fleet_path, kind, dry_run, sync, converge, model_filter,
+              allow_stale) -> None:
     """Cascade template truth into the derived models (allowlist-gated)."""
     fleet = _load(fleet_path)
     baseline = _fresh_baseline(fleet, allow_stale)
-    findings = detect_fleet(fleet, baseline, Ledger(fleet.ledger_path),
-                            model_filter=model_filter)
-    result = run_remediate(fleet, findings, kind=kind, dry_run=dry_run,
-                           sync=sync)
+    detect_once = lambda: _detect(fleet, baseline, model_filter=model_filter)
+    kw = dict(kind=kind, dry_run=dry_run, sync=sync, baseline=baseline)
+    if converge:
+        results = remediate_converge(fleet, detect_once, **kw)
+    else:
+        results = [run_remediate(fleet, detect_once(), **kw)]
+    if converge and dry_run:
+        click.echo("note: --converge has no effect with --dry-run (nothing "
+                   "changes on disk between passes); showing one pass.")
+    failed = 0
+    for n, result in enumerate(results, 1):
+        if len(results) > 1:
+            click.echo(f"\n══ pass {n}")
+        _print_outcomes(result, dry_run)
+        failed += result.count("failed")
+    if converge and not dry_run:
+        last = results[-1]
+        state = ("converged" if last.count("applied") == 0
+                 else f"stopped after {len(results)} pass(es) without "
+                      f"converging; run again")
+        click.echo(f"── {state}")
+    if failed:
+        sys.exit(1)
+
+
+def _print_outcomes(result, dry_run):
     for o in result.outcomes:
         f = o.finding
         if o.status in ("applied", "would-apply"):
@@ -163,14 +241,23 @@ def remediate(fleet_path, kind, dry_run, sync, model_filter, allow_stale) -> Non
         elif o.status == "failed":
             click.echo(f"[FAILED] {f.model}: {f.kind} {f.ref} — {o.reason}",
                        err=True)
+        elif o.status == "blocked":
+            click.echo(f"[BLOCKED] {f.model}: {f.kind} {f.ref} — {o.reason}")
+        elif o.status == "auto_skipped_precondition":
+            click.echo(f"[precondition] {f.model}: {f.kind} {f.ref} — "
+                       f"{o.reason}")
+        elif o.status == "overridden":
+            click.echo(f"[ACK] {f.model}: {f.kind} {f.ref} — {o.reason}")
         else:
             click.echo(f"[skipped] {f.model}: {f.kind} {f.ref} — {o.reason}")
     click.echo(f"\n── summary: applied={result.count('applied')} "
                f"would-apply={result.count('would-apply')} "
                f"skipped={result.count('skipped')} "
+               f"blocked={result.count('blocked')} "
+               f"auto_skipped_precondition="
+               f"{result.count('auto_skipped_precondition')} "
+               f"overridden={result.count('overridden')} "
                f"failed={result.count('failed')}")
-    if result.count("failed"):
-        sys.exit(1)
 
 
 @main.command()
@@ -200,7 +287,7 @@ def ledger(fleet_path, as_json, revive_ref, kind, model, note) -> None:
                 + (f" in model '{model}'" if model else "")
                 + ". Run `drift-doctor ledger` to list retirement events and "
                   "check the reference and kind — this usually means a typo.")
-        e = led.record_revival(kind, revive_ref, model=model, note=note)
+        led.record_revival(kind, revive_ref, model=model, note=note)
         scope = f"model '{model}'" if model else "the whole fleet"
         click.echo(f"revived {kind} {revive_ref} for {scope} — it will not "
                    f"be re-removed.")

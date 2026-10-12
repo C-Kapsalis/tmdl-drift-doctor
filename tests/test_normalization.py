@@ -1,5 +1,7 @@
 """Comparison normalization: Desktop re-saves are not drift; content is."""
 
+from conftest import detect_all
+
 from tmdl_drift_doctor.tmdl import (canonicalize_meta, dax_references,
                                     normalize_expression, strip_comments)
 
@@ -46,3 +48,10 @@ def test_dax_references_skip_strings_and_comments():
     assert refs["qualified"] == {("Classes", "Capacity"), ("Plan Map", "PlanKey")}
     assert refs["bare"] == {"Total Visits"}
 
+
+def test_fixture_meta_reorder_is_not_drift_but_url_change_is(captured):
+    found = {(f.model, f.ref) for f in detect_all(captured)
+             if f.kind == "expression.drift"}
+    assert ("bravo", "Reporting Start Date") not in found   # reordered bag
+    assert ("bravo", "Portal URL") not in found
+    assert ("alpha", "Portal URL") in found                 # https:// change
