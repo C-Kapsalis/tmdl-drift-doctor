@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -177,6 +178,7 @@ class Model:
     expressions: dict = field(default_factory=dict) # name -> raw block text
     ref_tables: list = field(default_factory=list)  # model.tmdl `ref table`s
     relationships: dict = field(default_factory=dict)  # signature -> Relationship
+    _hosts: Optional[dict] = field(default=None, repr=False, compare=False)
 
     def measure(self, table: str, name: str) -> Optional[Measure]:
         t = self.tables.get(table)
@@ -189,12 +191,15 @@ class Model:
     def measure_hosts(self) -> dict:
         """{measure name: [host tables]} across the whole model. Measure
         names are model-global in the engine, so this is the index every
-        name-keyed decision must consult."""
-        out: dict = {}
-        for tname, table in self.tables.items():
-            for mname in table.measures:
-                out.setdefault(mname, []).append(tname)
-        return out
+        name-keyed decision must consult. Computed once per parse (a parsed
+        Model is never mutated; edits re-parse)."""
+        if self._hosts is None:
+            out: dict = {}
+            for tname, table in self.tables.items():
+                for mname in table.measures:
+                    out.setdefault(mname, []).append(tname)
+            self._hosts = out
+        return self._hosts
 
 
 def _is_expr_continuation(line: str) -> bool:
@@ -457,7 +462,7 @@ def relationship_block_spans(content: str) -> list:
     return spans
 
 
-def parse_relationships_text(content: str, where: str = "relationships.tmdl") -> dict:
+def parse_relationships_text(content: str) -> dict:
     """{signature: Relationship}. A block without both endpoints is skipped
     (it cannot be identified); a repeated signature keeps the first block."""
     out: dict = {}
@@ -495,7 +500,7 @@ def parse_relationships_file(path: Path) -> dict:
     path = Path(path)
     if not path.exists():
         return {}
-    return parse_relationships_text(path.read_text(encoding="utf-8"), str(path))
+    return parse_relationships_text(path.read_text(encoding="utf-8"))
 
 
 # ───────────────────── string-aware expression scanning ─────────────────────
@@ -674,6 +679,14 @@ def blank_strings(text: str) -> str:
 
 
 def dax_references(expr: Optional[str]) -> dict:
+    """See ``_dax_references``; results are cached per expression text,
+    because dependency checks scan every definition once per finding."""
+    q, b, t = _dax_references(expr or "")
+    return {"qualified": set(q), "bare": set(b), "tables": set(t)}
+
+
+@lru_cache(maxsize=8192)
+def _dax_references(expr: str) -> tuple:
     """What a DAX expression refers to, from a string-aware token scan:
 
     * ``qualified``: {(table, name)} for ``Table[Name]`` / ``'Table'[Name]``
@@ -738,7 +751,7 @@ def dax_references(expr: Optional[str]) -> dict:
                 i += 1
             continue
         i += 1
-    return {"qualified": qualified, "bare": bare, "tables": tables}
+    return frozenset(qualified), frozenset(bare), frozenset(tables)
 
 
 def parse_mapping_rows(source: str) -> dict:
