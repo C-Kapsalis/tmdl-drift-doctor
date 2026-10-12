@@ -330,7 +330,8 @@ The full documentation, organized with the [Diátaxis](https://diataxis.fr/)
 framework (a getting-started tutorial, how-to guides for managing a fleet
 and running in CI, and the CLI, configuration, drift-kind and ledger
 reference), is published from the separate `tmdl-drift-doctor-documentation`
-repository on Read the Docs.
+repository on Read the Docs at
+<https://tmdl-drift-doctor-documentation.readthedocs.io/en/latest/>.
 
 Version history is in [RELEASE-NOTES.md](RELEASE-NOTES.md).
 
