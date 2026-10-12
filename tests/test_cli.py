@@ -60,7 +60,8 @@ def test_cli_survives_legacy_console_encoding(fleet_dir):
     subprocess.run([*args, "capture", *fleet], env=env, check=True,
                    capture_output=True)
     r = subprocess.run([*args, "detect", *fleet], env=env,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="cp1252",
+                       errors="replace")
     assert r.returncode == 1, r.stderr        # drift found, not a crash
     assert "UnicodeEncodeError" not in r.stderr
     assert "finding(s)" in r.stdout
