@@ -3,17 +3,22 @@
     drift-doctor capture   --fleet fleet.yml
     drift-doctor detect    --fleet fleet.yml [--json] [--model NAME] [--kind PFX]
     drift-doctor remediate --fleet fleet.yml [--kind PFX] [--dry-run] [--sync] [--converge]
+    drift-doctor ratchet   check|tighten --fleet fleet.yml [--from-json FILE]
+    drift-doctor audit     --fleet fleet.yml [--model NAME] [--json]
+    drift-doctor review    --fleet fleet.yml [--out REVIEW.md]
     drift-doctor ledger    --fleet fleet.yml [--json]
     drift-doctor ledger    --fleet fleet.yml --revive REF --kind KIND [--model NAME]
 
-Exit codes: 0 success / clean; 1 actionable drift, a failed fix, or a
-usage/config error; 3 a model that could not be parsed.
+Exit codes: 0 success / clean; 1 actionable drift, a ratchet violation, a
+failed fix, or a usage/config error; 2 a report the ratchet refuses to
+trust; 3 a model that could not be parsed; 4 audit found a reverted fix.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import click
 
@@ -258,6 +263,172 @@ def _print_outcomes(result, dry_run):
                f"{result.count('auto_skipped_precondition')} "
                f"overridden={result.count('overridden')} "
                f"failed={result.count('failed')}")
+
+
+# ───────────────────────────── ratchet ─────────────────────────────
+
+@main.group()
+def ratchet() -> None:
+    """Fail CI when drift rises above the recorded per-model floors."""
+
+
+def _ratchet_report(fleet, from_json, allow_stale):
+    if from_json:
+        try:
+            return json.loads(Path(from_json).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            click.echo(f"ERROR: cannot read {from_json}: {e}", err=True)
+            sys.exit(2)
+    baseline = _fresh_baseline(fleet, allow_stale)
+    errors: list = []
+    findings = _detect(fleet, baseline, errors)
+    return build_report(fleet, findings, errors)
+
+
+def _refuse(problems):
+    for p in problems:
+        click.echo(f"ERROR: {p}", err=True)
+    sys.exit(2)
+
+
+_from_json = click.option(
+    "--from-json", default=None, metavar="FILE",
+    help="Use a saved `detect --json` report instead of detecting now.")
+_allow_stale = click.option("--allow-stale", is_flag=True,
+                            help="Detect on a stale baseline.")
+
+
+@ratchet.command("check")
+@_fleet_option
+@_from_json
+@_allow_stale
+def ratchet_check(fleet_path, from_json, allow_stale) -> None:
+    """Exit 1 if any model's actionable findings (total or per kind) rose
+    above its floor, or any retired object came back."""
+    from .ratchet import check, load_floors, report_problems
+    fleet = _load(fleet_path)
+    report = _ratchet_report(fleet, from_json, allow_stale)
+    problems = report_problems(report, writing=False)
+    if problems:
+        _refuse(problems)
+    try:
+        floors = load_floors(fleet.floors_path)
+    except DriftDoctorError as e:
+        _refuse([str(e)])
+    if floors is None:
+        _refuse([f"no floors file at {fleet.floors_path}; seed it with "
+                 f"`drift-doctor ratchet tighten` and commit it"])
+    res = check(report, floors, fleet.gating)
+    for line in res.violations:
+        click.echo(f"[RISE] {line}")
+    if res.advisories:
+        click.echo("advisory models (reported, never fail the check):")
+        for line in res.advisories:
+            click.echo(f"  {line}")
+    for line in res.improved:
+        click.echo(f"[improved] {line} (lower the floor with `ratchet "
+                   f"tighten`)")
+    for line in res.notes:
+        click.echo(f"note: {line}")
+    if res.ok:
+        click.echo("ratchet: every gated model is at or below its floor.")
+    else:
+        sys.exit(1)
+
+
+@ratchet.command("tighten")
+@_fleet_option
+@_from_json
+@_allow_stale
+@click.option("--allow-new", is_flag=True,
+              help="Record models that have no floor yet at their current "
+                   "counts.")
+@click.option("--prune", is_flag=True,
+              help="Drop floors of models no longer in fleet.yml.")
+def ratchet_tighten(fleet_path, from_json, allow_stale, allow_new, prune) -> None:
+    """Lower every floor to min(floor, current). Never raises a floor.
+    Only a full-fleet, unfiltered, error-free report is accepted."""
+    from .ratchet import load_floors, report_problems, save_floors, tighten
+    fleet = _load(fleet_path)
+    report = _ratchet_report(fleet, from_json, allow_stale)
+    problems = report_problems(report, writing=True)
+    if problems:
+        _refuse(problems)
+    try:
+        floors = load_floors(fleet.floors_path)
+    except DriftDoctorError as e:
+        _refuse([str(e)])
+    doc, changes = tighten(report, floors, allow_new=allow_new, prune=prune,
+                           fleet_models=list(fleet.models))
+    for line in changes:
+        click.echo(f"  {line}")
+    if floors is None or doc["models"] != floors.get("models"):
+        save_floors(fleet.floors_path, doc)
+        click.echo(f"floors written: {fleet.floors_path}")
+    else:
+        click.echo("floors unchanged.")
+
+
+# ───────────────────────────── audit / review ─────────────────────────────
+
+@main.command()
+@_fleet_option
+@click.option("--model", "model_filter", default=None,
+              help="Only this derived model.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def audit(fleet_path, model_filter, as_json) -> None:
+    """Re-verify every applied fix in the ledger. Exit 4 if one was reverted
+    (an added object is gone, or a removed one is back)."""
+    from .audit import REVERT_EXIT_CODE
+    from .audit import audit as run_audit
+    fleet = _load(fleet_path)
+    try:
+        baseline = load_baseline(fleet)
+        items = run_audit(fleet, Ledger(fleet.ledger_path), baseline,
+                          model_filter=model_filter)
+    except DriftDoctorError as e:
+        raise click.ClickException(str(e))
+    if as_json:
+        click.echo(json.dumps([{"status": i.status, "detail": i.detail,
+                                **{k: i.event.get(k) for k in
+                                   ("ts", "model", "kind", "ref")}}
+                               for i in items], indent=2, ensure_ascii=False))
+    else:
+        for i in items:
+            e = i.event
+            if i.status == "ok":
+                continue
+            label = {"reverted": "REVERTED", "error": "ERROR"}.get(
+                i.status, i.status)
+            click.echo(f"[{label}] {e.get('model')}: {e.get('kind')} "
+                       f"{e.get('ref')} (applied {e.get('ts')}) — {i.detail}")
+        counts = {s: sum(1 for i in items if i.status == s)
+                  for s in ("ok", "reverted", "superseded", "error")}
+        click.echo(f"── audit: checked={len(items)} "
+                   + " ".join(f"{k}={v}" for k, v in counts.items()))
+    if any(i.status == "reverted" for i in items):
+        sys.exit(REVERT_EXIT_CODE)
+    if any(i.status == "error" for i in items):
+        sys.exit(PARSE_ERROR_EXIT)
+
+
+@main.command()
+@_fleet_option
+@click.option("--out", default="REVIEW.md", show_default=True,
+              help="Where to write the checklist.")
+@click.option("--allow-stale", is_flag=True,
+              help="Proceed on a stale baseline (misclassification risk).")
+def review(fleet_path, out, allow_stale) -> None:
+    """Write a per-model checklist of everything routed to a human."""
+    from .review import collect, render
+    fleet = _load(fleet_path)
+    baseline = _fresh_baseline(fleet, allow_stale)
+    findings = _detect(fleet, baseline)
+    queue = collect(fleet, findings, baseline)
+    Path(out).write_text(render(fleet, queue), encoding="utf-8")
+    total = sum(len(v) for sections in queue.values()
+                for v in sections.values())
+    click.echo(f"{total} review item(s) -> {out}")
 
 
 @main.command()
