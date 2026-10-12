@@ -136,8 +136,10 @@ def check(report: dict, floors_doc: dict, gating: dict) -> CheckResult:
         found = []
         for f in raised.get(name, ()):
             found.append(f"{name}: resurrection {f['kind']} {f['ref']} (a "
-                         f"ledger-retired object is back; hard zero, never "
-                         f"floored)")
+                         f"ledger-retired object is still or again in the "
+                         f"model; hard zero, never floored: cascade it with "
+                         f"`remediate --sync` or declare a `retain` "
+                         f"override)")
         cur = current[name]
         floor = floors.get(name)
         if floor is None:

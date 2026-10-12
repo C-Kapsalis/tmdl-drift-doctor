@@ -371,15 +371,15 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
         if rel is None:
             findings.append(Finding(
                 kind="relationship.missing", model=name, ref=sig,
-                template_value=_fmt_props(props),
+                template_value=_fmt_rel(props),
                 detail=(f"template relationship {sig} is absent from "
                         f"'{name}' (appended only once both endpoints "
                         f"exist)")))
         elif rel.properties != props:
             findings.append(Finding(
                 kind="relationship.modified", model=name, ref=sig,
-                template_value=_fmt_props(_non_default(props)),
-                derived_value=_fmt_props(_non_default(rel.properties)),
+                template_value=_fmt_rel(props),
+                derived_value=_fmt_rel(rel.properties),
                 detail=(f"relationship {sig} properties differ from the "
                         f"template (overwrite keeps '{name}''s block name)")))
 
@@ -641,9 +641,11 @@ def _fmt_props(props: dict) -> str:
     return ", ".join(f"{k}={v}" for k, v in sorted(props.items())) or "(none)"
 
 
-def _non_default(props: dict) -> dict:
+def _fmt_rel(props: dict) -> str:
+    """Relationship properties that differ from the engine defaults."""
     from .tmdl import RELATIONSHIP_DEFAULTS
-    return {k: v for k, v in props.items() if RELATIONSHIP_DEFAULTS.get(k) != v}
+    shown = {k: v for k, v in props.items() if RELATIONSHIP_DEFAULTS.get(k) != v}
+    return _fmt_props(shown) if shown else "(engine defaults)"
 
 
 def _live_view(model: Model, mapping_tables: list) -> dict:
