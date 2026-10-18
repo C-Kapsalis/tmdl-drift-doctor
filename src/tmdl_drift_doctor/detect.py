@@ -49,6 +49,7 @@ REMEDIABLE_KINDS = (
     "measure.wrong_host",
     "column.property_drift",
     "expression.drift",
+    "expression.missing",
     "mapping_row.missing",
     "relationship.missing",
     "relationship.modified",
@@ -335,20 +336,8 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                     derived_value=_fmt_props(d["properties"]),
                     detail=f"measure {ref} properties differ from the template"))
 
-    # ── shared expressions (allowlist-named ONLY) ──
-    b_exprs = baseline.get("expressions") or {}
-    for ename in sorted(fleet.allowlist_expressions):
-        if ename not in b_exprs:
-            continue  # the template doesn't define it: nothing canonical
-        t_norm = normalize_expression(b_exprs[ename])
-        d_raw = live["expressions"].get(ename)
-        if d_raw is None or normalize_expression(d_raw) != t_norm:
-            findings.append(Finding(
-                kind="expression.drift", model=name, ref=ename,
-                template_value=_clip(t_norm),
-                derived_value=_clip(normalize_expression(d_raw)) if d_raw else "(absent)",
-                detail=(f"shared expression '{ename}' differs from the "
-                        f"template (allowlisted cascade set)")))
+    # ── shared expressions ──
+    findings.extend(_expression_findings(name, fleet, baseline, model))
 
     # ── mapping rows (template -> derived) ──
     for tname, rows in (baseline.get("mapping_rows") or {}).items():
@@ -424,6 +413,46 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
     # ── retirements (ledger-proven), with the coupling guard ──
     findings.extend(_retirements(name, model, live, baseline, retire))
     return findings
+
+
+def _one_line(form: str) -> str:
+    return _clip(" | ".join(ln.strip() for ln in form.split("\n") if ln.strip()))
+
+
+def _expression_findings(name: str, fleet: Fleet, baseline: dict,
+                         model: Model) -> list:
+    """``expression.drift`` for allowlisted names whose declaration (any of
+    them, when a name is declared more than once) differs from the
+    template's in comparison form; ``expression.missing`` for every template
+    name the model does not declare at all."""
+    out = []
+    b_exprs = baseline.get("expressions") or {}
+    for ename in sorted(fleet.allowlist_expressions):
+        if ename not in b_exprs or ename not in model.expression_forms:
+            continue
+        wanted = b_exprs[ename]
+        differing = [f for f in model.expression_forms[ename] if f != wanted]
+        if differing:
+            out.append(Finding(
+                kind="expression.drift", model=name, ref=ename,
+                template_value=_one_line(wanted),
+                derived_value=_one_line(differing[0]),
+                detail=(f"shared expression '{ename}' differs from the "
+                        f"template (allowlisted cascade set)")))
+    if not model.has_expressions_file:
+        return out
+    for ename in sorted(b_exprs):
+        if ename in model.expression_forms:
+            continue
+        detail = f"template expression '{ename}' is not declared in '{name}'"
+        if ename in fleet.connection_parameters:
+            detail += ("; it is a connection parameter, so remediation never "
+                       "writes it: copy the declaration from the template and "
+                       "set this model's own value")
+        out.append(Finding(kind="expression.missing", model=name, ref=ename,
+                           template_value=_one_line(b_exprs[ename]),
+                           detail=detail))
+    return out
 
 
 def _retirements(name: str, model: Model, live: dict, baseline: dict,

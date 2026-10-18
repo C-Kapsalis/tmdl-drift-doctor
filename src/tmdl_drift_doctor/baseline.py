@@ -31,7 +31,7 @@ from .fleet import Fleet
 from .ledger import Ledger
 from .tmdl import Model, normalize_expression, parse_mapping_rows, parse_model
 
-SNAPSHOT_VERSION = 2
+SNAPSHOT_VERSION = 3
 
 
 def build_snapshot(model: Model, mapping_tables: list) -> dict:
@@ -82,8 +82,9 @@ def ensure_baseline_fresh(fleet: Fleet, baseline: dict) -> None:
         raise StaleBaselineError(
             f"the committed baseline uses snapshot format "
             f"{baseline.get('version')!r}, and this drift-doctor writes "
-            f"format {SNAPSHOT_VERSION} (it now also records relationships "
-            f"and normalizes expressions differently). Run `drift-doctor "
+            f"format {SNAPSHOT_VERSION} (it now compares shared expressions "
+            f"with their comments and records template metrics). Run "
+            f"`drift-doctor "
             f"capture` once to upgrade it; the ledger is kept as is.")
     live = build_snapshot(parse_model(fleet.template_definition),
                           fleet.mapping_tables)

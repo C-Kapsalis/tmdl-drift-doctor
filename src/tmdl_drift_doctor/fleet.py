@@ -62,6 +62,7 @@ class Fleet:
     allowlist_expressions: set = field(default_factory=set)
     gating: dict = field(default_factory=dict)      # name -> enforced|advisory
     overrides: dict = field(default_factory=dict)   # name -> [Override]
+    connection_parameters: set = field(default_factory=set)
 
     def is_advisory(self, name: str) -> bool:
         return self.gating.get(name) == "advisory"
@@ -219,6 +220,7 @@ def load_fleet(path) -> Fleet:
         allowlist_expressions=set(allow.get("expressions") or []),
         gating=gating,
         overrides=overrides,
+        connection_parameters=set(data.get("connection_parameters") or []),
     )
     fleet.state_dir.mkdir(parents=True, exist_ok=True)
     return fleet

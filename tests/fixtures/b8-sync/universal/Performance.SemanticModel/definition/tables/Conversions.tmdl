@@ -1,0 +1,56 @@
+/// Daily conversions per bike-shop web order (fictional stand-in).
+table Conversions
+	lineageTag: 3c1d2a70-1b2e-4c5d-9e8f-0a1b2c3d4e5f
+
+	column order_date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 4d2e3b81-2c3f-4d6e-8f90-1b2c3d4e5f60
+		summarizeBy: none
+		sourceColumn: order_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column conversions
+		dataType: int64
+		formatString: 0
+		lineageTag: 5e3f4c92-3d40-4e7f-9a01-2c3d4e5f6071
+		summarizeBy: sum
+		sourceColumn: conversions
+
+		annotation SummarizationSetBy = Automatic
+
+	column value_monetary
+		dataType: double
+		lineageTag: 6f405da3-4e51-4f80-ab12-3d4e5f607182
+		summarizeBy: sum
+		sourceColumn: value_monetary
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	refreshPolicy
+		policyType: basic
+		rollingWindowGranularity: month
+		rollingWindowPeriods: 24
+		incrementalGranularity: day
+		incrementalPeriods: 7
+		sourceExpression =
+				let
+				    Source = source_filter_dates("conversions_n", "order_date", false, RangeStart, RangeEnd)
+				in
+				    Source
+
+	partition Conversions-0a1b2c3d = m
+		mode: import
+		queryGroup: Marketing
+		source =
+				let
+				    Source = source_filter_dates("conversions_n", "order_date", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit")
+				in
+				    Source
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navigation

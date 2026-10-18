@@ -175,7 +175,9 @@ class Relationship:
 class Model:
     definition: Path                                # the definition/ dir
     tables: dict = field(default_factory=dict)      # name -> Table
-    expressions: dict = field(default_factory=dict) # name -> raw block text
+    expressions: dict = field(default_factory=dict) # name -> comparison form
+    expression_forms: dict = field(default_factory=dict)  # name -> [forms]
+    has_expressions_file: bool = False
     ref_tables: list = field(default_factory=list)  # model.tmdl `ref table`s
     relationships: dict = field(default_factory=dict)  # signature -> Relationship
     _hosts: Optional[dict] = field(default=None, repr=False, compare=False)
@@ -356,35 +358,72 @@ def parse_table_file(path: Path) -> Table:
     return table
 
 
-def parse_expressions_file(path: Path) -> dict:
-    """Parse ``expressions.tmdl`` into {name: comparable_block_text}.
+_DOC_LINE = re.compile(r"^///")
 
-    The comparable text is the raw block minus lineageTag/annotation lines —
-    shared-parameter drift must not fire on identity metadata.
+
+def expression_spans(content: str) -> list:
+    """[(name, start, end)] line spans of every column-0 ``expression`` block.
+
+    Ownership rules: a run of column-0 ``///`` lines documents the
+    declaration BELOW it, so a span opens at its own leading doc run, takes
+    the declaration and every following line up to the next declaration, and
+    then gives back its trailing blank lines and any trailing doc run (those
+    belong to the next block). Names may repeat; every occurrence is listed.
     """
+    lines = content.split("\n")
+    decls = [i for i, ln in enumerate(lines) if _EXPRESSION_RE.match(ln)]
+    spans = []
+    for n, i in enumerate(decls):
+        start = i
+        while start - 1 >= 0 and _DOC_LINE.match(lines[start - 1]):
+            start -= 1
+        stop = decls[n + 1] if n + 1 < len(decls) else len(lines)
+        end = stop
+        while end - 1 > i and (lines[end - 1].strip() == ""
+                               or _DOC_LINE.match(lines[end - 1])):
+            end -= 1
+        name = unquote(_EXPRESSION_RE.match(lines[i]).group(1))
+        spans.append((name, start, end))
+    return spans
+
+
+def expression_form(block: str) -> str:
+    """The comparison form of one expression block: lineage-tag lines
+    dropped, the ``meta [...]`` bag put in canonical order, trailing
+    whitespace and blank edges removed. Everything else, doc comments and
+    ``//`` comments included, is compared as written: a comment-only change
+    is drift."""
+    kept = []
+    for line in block.replace("\r\n", "\n").split("\n"):
+        if line.strip().startswith("lineageTag:"):
+            continue
+        kept.append(line.rstrip())
+    while kept and not kept[-1]:
+        kept.pop()
+    while kept and not kept[0]:
+        kept.pop(0)
+    return canonicalize_meta("\n".join(kept))
+
+
+def parse_expression_forms(path: Path) -> dict:
+    """{name: [comparison form, ...]} with one entry per declaration (a file
+    may declare the same name more than once)."""
+    path = Path(path)
     if not path.exists():
         return {}
-    text = path.read_text(encoding="utf-8")
-    lines = text.split("\n")
+    content = path.read_text(encoding="utf-8")
+    lines = content.split("\n")
     out: dict = {}
-    current: Optional[str] = None
-    body: list[str] = []
-    for line in lines:
-        m = _EXPRESSION_RE.match(line)
-        if m:
-            if current is not None:
-                out[current] = "\n".join(body).strip()
-            current = unquote(m.group(1))
-            body = [line]
-            continue
-        if current is not None:
-            stripped = line.strip()
-            if stripped.startswith("lineageTag:") or stripped.startswith("annotation "):
-                continue
-            body.append(line)
-    if current is not None:
-        out[current] = "\n".join(body).strip()
+    for name, start, end in expression_spans(content):
+        out.setdefault(name, []).append(
+            expression_form("\n".join(lines[start:end])))
     return out
+
+
+def parse_expressions_file(path: Path) -> dict:
+    """{name: comparison form} of the FIRST declaration of each name."""
+    return {name: forms[0]
+            for name, forms in parse_expression_forms(path).items()}
 
 
 def parse_model(definition: Path) -> Model:
@@ -398,7 +437,10 @@ def parse_model(definition: Path) -> Model:
         for f in sorted(tables_dir.glob("*.tmdl")):
             t = parse_table_file(f)
             model.tables[t.name] = t
-    model.expressions = parse_expressions_file(definition / "expressions.tmdl")
+    model.expression_forms = parse_expression_forms(
+        definition / "expressions.tmdl")
+    model.expressions = {n: f[0] for n, f in model.expression_forms.items()}
+    model.has_expressions_file = (definition / "expressions.tmdl").exists()
     model.relationships = parse_relationships_file(
         definition / "relationships.tmdl")
     model_file = definition / "model.tmdl"

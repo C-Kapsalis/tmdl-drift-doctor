@@ -111,3 +111,85 @@ def edit_file(path: Path, old: str, new: str) -> None:
     text = Path(path).read_text(encoding="utf-8")
     assert old in text, f"{old!r} not in {path}"
     Path(path).write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Ported-suite helpers (added with the test port of the user's original suite)
+#
+# * ``FIXTURES`` is ``tests/fixtures``. Each ported batch keeps its stand-in
+#   models in its own sub-folder there.
+# * ``stand_in(name)`` copies ``tests/fixtures/<name>`` into ``tmp_path`` and
+#   returns the copy, so a test may mutate it.
+# * ``write_fleet(root, template, models, **keys)`` writes ``root/fleet.yml``
+#   (version 1) with paths relative to ``root`` and returns its path. ``models``
+#   maps a name to a path or to a long-form mapping. Extra keys (allowlist,
+#   mapping_tables, state_dir, overrides, ...) are written as given.
+# * ``drift(cmd, *args, fleet=None, input=None)`` runs ``drift-doctor <cmd>``
+#   through the click entry point. ``cmd`` is the command path as one string
+#   ("detect", "ratchet check"); ``--fleet <fleet>`` is inserted after it when
+#   ``fleet`` is given. Returns the click ``Result`` (``exit_code``,
+#   ``output``, ``stdout``, ``stderr``).
+# * ``drift_json(cmd, *args, fleet=None)`` runs with ``--json`` and parses
+#   stdout.
+# ---------------------------------------------------------------------------
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def stand_in(tmp_path):
+    def _copy(name: str, dest_name: str | None = None) -> Path:
+        src = FIXTURES / name
+        dst = tmp_path / (dest_name or Path(name).name)
+        if src.is_dir():
+            shutil.copytree(src, dst)
+        else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        return dst
+    return _copy
+
+
+def write_fleet(root, template, models: dict, **keys) -> Path:
+    import yaml
+    root = Path(root)
+
+    def rel(p):
+        p = Path(p)
+        try:
+            return str(p.relative_to(root)) if p.is_absolute() else str(p)
+        except ValueError:
+            return str(p)
+
+    out_models = {}
+    for name, entry in models.items():
+        if isinstance(entry, dict):
+            entry = dict(entry)
+            entry["path"] = rel(entry["path"])
+            out_models[name] = entry
+        else:
+            out_models[name] = rel(entry)
+    data = {"version": 1, "template": rel(template), "models": out_models}
+    data.update(keys)
+    path = root / "fleet.yml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def drift(cmd: str, *args, fleet=None, input=None, env=None):
+    from click.testing import CliRunner
+    from tmdl_drift_doctor.cli import main
+    argv = cmd.split()
+    if fleet is not None:
+        argv += ["--fleet", str(fleet)]
+    argv += [str(a) for a in args]
+    return CliRunner().invoke(main, argv, input=input, env=env)
+
+
+def drift_json(cmd: str, *args, fleet=None):
+    import json
+    r = drift(cmd, "--json", *args, fleet=fleet)
+    try:
+        return r, json.loads(r.stdout)
+    except ValueError:
+        return r, None

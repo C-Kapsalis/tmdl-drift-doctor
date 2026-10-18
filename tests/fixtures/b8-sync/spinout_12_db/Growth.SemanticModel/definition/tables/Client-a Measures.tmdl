@@ -1,0 +1,56 @@
+table 'Client-a Measures'
+	lineageTag: 7a1b2c3d-0001-4e00-8000-000000000001
+
+	/// Streaming revenue earned from first views, excluding VAT (fictional stand-in).
+	measure '^Streaming Revenue from First Views (no VAT)' = SUM('Film Views'[revenue_net])
+		formatString: #,0.00
+		displayFolder: Revenue
+		lineageTag: 7a1b2c3d-0002-4e00-8000-000000000002
+
+	/// Number of first views of a title.
+	measure '^First Views #' = CALCULATE(COUNTROWS('Film Views'), 'Film Views'[is_first_view] = TRUE())
+		formatString: #,0
+		displayFolder: Views
+		lineageTag: 7a1b2c3d-0003-4e00-8000-000000000003
+
+	/// Average streaming revenue per first view.
+	measure '^Revenue per First View' =
+			DIVIDE([^Streaming Revenue from First Views (no VAT)], [^First Views #])
+		formatString: #,0.00
+		displayFolder: Revenue
+		lineageTag: 7a1b2c3d-0004-4e00-8000-000000000004
+
+		annotation PBI_FormatHint = {"isDecimal":true}
+
+	/// Licensing cost of the catalogue per first view.
+	measure '^Content Cost per First View' = DIVIDE(SUM('Film Costs'[licence_cost]), [^First Views #])
+		formatString: #,0.00
+		displayFolder: Cost
+		lineageTag: 7a1b2c3d-0005-4e00-8000-000000000005
+
+	/// Share of first views that came from returning members.
+	measure '^Returning Share %' =
+			VAR returning = CALCULATE([^First Views #], 'Film Views'[is_returning] = TRUE())
+			RETURN DIVIDE(returning, [^First Views #])
+		formatString: 0.0%
+		displayFolder: Views
+		lineageTag: 7a1b2c3d-0006-4e00-8000-000000000006
+
+	column z
+		dataType: string
+		isHidden
+		lineageTag: 7a1b2c3d-0007-4e00-8000-000000000007
+		summarizeBy: none
+		sourceColumn: z
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Client-a Measures' = m
+		mode: import
+		source =
+				let
+				    Source = #table({"z"}, {})
+				in
+				    Source
+
+	annotation PBI_ResultType = Table

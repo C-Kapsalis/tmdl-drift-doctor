@@ -41,8 +41,9 @@ from . import TmdlEditError
 # previous object too: without them, a table's last column would carry the
 # refresh policy along when it is copied or removed.
 _OBJECT_BOUNDARY = re.compile(
-    r"^\t(?:///|column\b|measure\b|partition\b|hierarchy\b|annotation\b"
-    r"|refreshPolicy\b|calculationGroup\b|changedProperty\b|extendedProperty\b)"
+    r"^(?:\t(?:///|column\b|measure\b|partition\b|hierarchy\b|annotation\b"
+    r"|refreshPolicy\b|calculationGroup\b|changedProperty\b|extendedProperty\b"
+    r"|table\b)|table\b)"
 )
 
 # TMDL property keywords that must never appear inside an expression body.
@@ -132,7 +133,11 @@ def replace_block(content: str, keyword: str, name: str, new_block: str) -> Opti
 
 def insert_measure_block(content: str, block: str) -> str:
     """Insert a measure block before the first partition or table-level
-    annotation (idiomatic TMDL keeps measures above partitions)."""
+    annotation (idiomatic TMDL keeps measures above partitions). A block
+    line that does not start with a tab gets one, so a block written at
+    column 0 still lands at object depth."""
+    block = "\n".join(ln if (not ln or ln.startswith("\t")) else "\t" + ln
+                      for ln in block.split("\n"))
     lines = content.split("\n")
     insert_at = len(lines)
     boundary = re.compile(r"^\t(?:partition\b|annotation\b)")
@@ -411,24 +416,20 @@ def deregister_table(model_content: str, table_name: str) -> str:
 
 
 # ───────────────────────── expressions.tmdl blocks ─────────────────────────
+# Spans come from ``tmdl.expression_spans``: a block owns the ``///`` run
+# directly above its declaration and never the run above the NEXT one.
+
+def expression_block_spans(content: str, name: str) -> list:
+    """Every (start, end) line span declaring `name`, in file order."""
+    from .tmdl import expression_spans
+    return [(s, e) for n, s, e in expression_spans(content) if n == name]
+
 
 def expression_block_span(content: str, name: str) -> Optional[Tuple[int, int]]:
-    """(start, end) lines of a top-level ``expression NAME = ...`` block."""
-    esc = re.escape(name)
-    quoted = re.escape("'" + name.replace("'", "''") + "'")
-    decl = re.compile(rf"^expression\s+(?:{quoted}|{esc})\s*=")
-    lines = content.split("\n")
-    start = next((i for i, l in enumerate(lines) if decl.match(l)), None)
-    if start is None:
-        return None
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if lines[j].startswith("expression "):
-            end = j
-            break
-    while end - 1 > start and lines[end - 1].strip() == "":
-        end -= 1
-    return (start, end)
+    """(start, end) lines of the first ``expression NAME = ...`` block,
+    its own leading doc comment included."""
+    spans = expression_block_spans(content, name)
+    return spans[0] if spans else None
 
 
 def extract_expression_block(content: str, name: str) -> Optional[str]:
@@ -438,17 +439,199 @@ def extract_expression_block(content: str, name: str) -> Optional[str]:
     return "\n".join(content.split("\n")[span[0]:span[1]])
 
 
-def replace_or_append_expression(content: str, name: str, new_block: str) -> str:
-    """Replace a named top-level expression block, or append it."""
-    span = expression_block_span(content, name)
+def replace_expression_blocks(content: str, name: str, rewrite) -> str:
+    """Replace each declaration of `name` with ``rewrite(old_block)``
+    (return the old block to keep it). Neighbouring blocks, and the doc
+    comment of the next declaration in particular, are never touched."""
     lines = content.split("\n")
-    if span is None:
-        while lines and lines[-1].strip() == "":
-            lines.pop()
-        lines.extend(["", *new_block.split("\n")])
-        return "\n".join(lines) + "\n"
-    lines[span[0]:span[1]] = new_block.split("\n")
+    for start, end in reversed(expression_block_spans(content, name)):
+        old = "\n".join(lines[start:end])
+        new = rewrite(old)
+        if new != old:
+            lines[start:end] = new.split("\n")
     return "\n".join(lines)
+
+
+def append_expression_block(text, block):
+    """Append a block after the existing ones: exactly one blank line
+    between blocks, the rest of the file byte-identical."""
+    lines = text.split("\n")
+    while lines and lines[-1].strip() == "":
+        lines.pop()
+    if lines:
+        lines.append("")
+    lines.extend(block.rstrip("\n").split("\n"))
+    return "\n".join(lines) + "\n"
+
+
+def replace_or_append_expression(content: str, name: str, new_block: str) -> str:
+    """Replace every declaration of `name` with `new_block`, or append it."""
+    if expression_block_span(content, name) is None:
+        return append_expression_block(content, new_block)
+    return replace_expression_blocks(content, name, lambda _old: new_block)
+
+
+# ───────────────────── measure DAX body replacement ─────────────────────
+# Replaces the DAX body of one measure and nothing else. The span finder and
+# formatter live in ``measure_expression_replacer`` (a module attribute, so a
+# caller or a test can swap it); ``replace_measure_expression`` wraps it in a
+# preservation guard that locates the non-DAX regions on its own.
+
+def _measure_decl(lines: list, name: str) -> Optional[Tuple[int, int]]:
+    """(line index, column just past '=') of the measure's declaration."""
+    q = re.escape(name.replace("'", "''"))
+    pat = re.compile(rf"^\s*measure\s+(?:'{q}'|\"{re.escape(name)}\"|"
+                     rf"{re.escape(name)})\s*=")
+    for i, line in enumerate(lines):
+        m = pat.match(line)
+        if m:
+            return i, m.end()
+    return None
+
+
+def _shallow(line: str) -> bool:
+    """A line that ends a bare/inline body: at most two tabs, then text."""
+    return re.match(r"^\t{0,2}\S", line) is not None
+
+
+def _fenced_dax_lines(dax: str) -> list:
+    out = []
+    raw = dax.split("\n")
+    if raw and raw[0].strip().startswith("measure"):
+        raw = raw[1:]
+    for line in raw:
+        if not line.strip():
+            out.append("")
+            continue
+        lead = re.match(r"^[ \t]*", line).group(0)
+        rest = line[len(lead):]
+        # each leading group of four spaces becomes a tab, then the tabs go
+        lead = lead.replace("    ", "\t").lstrip("\t")
+        text = lead + rest
+        stripped = text.strip()
+        depth = 3 if (stripped.startswith(") &") or stripped == ")") else 5
+        out.append("\t" * depth + text)
+    return out
+
+
+def _default_measure_replacer(text, measure, dax_text):
+    content, name, new_dax = text, measure, dax_text
+    lines = content.split("\n")
+    found = _measure_decl(lines, name)
+    if found is None:
+        return False, content
+    i, eq = found
+    rest = lines[i][eq:].strip()
+    if rest.startswith("```"):
+        if rest != "```":
+            return False, content
+        close = next((j for j in range(i + 1, len(lines))
+                      if lines[j].strip() == "```"), None)
+        if close is None:
+            return False, content
+        first, last = i + 1, close
+        while first < last and not lines[first].strip():
+            first += 1
+        while last > first and not lines[last - 1].strip():
+            last -= 1
+        lines[first:last] = _fenced_dax_lines(new_dax)
+        return True, "\n".join(lines)
+    j = i + 1
+    while j < len(lines) and not _shallow(lines[j]):
+        j += 1
+    end = j
+    while end > i + 1 and not lines[end - 1].strip():
+        end -= 1
+    if not rest and end == i + 1:
+        return False, content          # bare declaration with no body
+    dax = new_dax.split("\n")
+    while dax and not dax[0].strip():
+        dax.pop(0)
+    while dax and not dax[-1].strip():
+        dax.pop()
+    if dax and dax[0].strip().startswith("measure "):
+        dax.pop(0)
+        while dax and not dax[0].strip():
+            dax.pop(0)
+    if not dax:
+        return False, content
+    head = lines[i][:eq]
+    if rest and len(dax) == 1:
+        lines[i:end] = [head + " " + dax[0].strip()]
+    else:
+        lines[i:end] = [head] + [("\t\t\t" + d) if d.strip() else ""
+                                 for d in dax]
+    return True, "\n".join(lines)
+
+
+measure_expression_replacer = _default_measure_replacer
+
+
+def _guard_regions(content: str, name: str) -> Optional[tuple]:
+    """The four regions of a file around one measure that are not DAX:
+    above the declaration, the declaration through '=', the measure's own
+    property/annotation lines, and everything from the next object on.
+    Located independently of the body finder it guards."""
+    lines = content.split("\n")
+    found = _measure_decl(lines, name)
+    if found is None:
+        return None
+    i, eq = found
+    k = i + 1
+    if lines[i][eq:].strip().startswith("```"):
+        while k < len(lines) and lines[k].strip() != "```":
+            k += 1
+        k += 1
+    props_at = None
+    while k < len(lines):
+        line = lines[k]
+        if re.match(r"^\t\t[^\t\s]", line):
+            props_at = k
+            break
+        if re.match(r"^\t?[^\t\s]", line):
+            break
+        k += 1
+    if props_at is None:
+        props, tail_at = [], k
+    else:
+        tail_at = props_at
+        while tail_at < len(lines) and not re.match(r"^\t?[^\t\s]",
+                                                     lines[tail_at]):
+            tail_at += 1
+        props = lines[props_at:tail_at]
+        while props and not props[-1].strip():
+            props.pop()
+    return ("\n".join(lines[:i]), lines[i][:eq], "\n".join(props),
+            "\n".join(lines[tail_at:]))
+
+
+_REGION_NAMES = ("the text above the declaration (its description)",
+                 "the declaration line", "its properties and annotations",
+                 "everything after the measure")
+
+
+def replace_measure_expression(text, measure, dax_text):
+    """(ok, new content): the measure's DAX body replaced, nothing else.
+
+    Raises TmdlEditError, and returns nothing to write, when the result
+    changed any non-DAX region (a property, the description, the next
+    object); ``(False, content)`` when the measure or its body cannot be
+    located."""
+    ok, out = measure_expression_replacer(text, measure, dax_text)
+    if not ok:
+        return False, text
+    name = measure
+    before, after = _guard_regions(text, name), _guard_regions(out, name)
+    if after is None:
+        raise TmdlEditError(
+            f"replacing the DAX of measure '{name}' lost its declaration; "
+            f"nothing was written.")
+    for label, a, b in zip(_REGION_NAMES, before, after):
+        if a != b:
+            raise TmdlEditError(
+                f"replacing the DAX of measure '{name}' would change {label}, "
+                f"not just the expression body; nothing was written.")
+    return True, out
 
 
 # ───────────────────────── relationships.tmdl blocks ─────────────────────────

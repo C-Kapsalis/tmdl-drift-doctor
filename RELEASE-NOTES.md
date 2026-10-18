@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+
+- **`expression.missing`.** Every expression the template declares and a
+  model does not is reported, whether or not the name is listed under
+  `allowlist.expressions` (that list only scopes content comparison).
+  When the kind is allowlisted, `remediate` adds the template block after
+  the existing ones, in alphabetical order, with a fresh lineage tag. Names
+  listed under the new top-level `connection_parameters` key are reported
+  with a hint ("copy the declaration from the template and set this
+  model's own value") and are never written.
+- **`tmdl_edit.replace_measure_expression`.** Replaces one measure's DAX
+  body and nothing else (single-line, bare multi-line and fenced shapes),
+  behind a guard that refuses any result in which the measure's
+  description, declaration, properties or the following objects changed.
+
+### Changed
+
+- **Shared expressions are compared with their comments (stricter).**
+  `expression.drift` used to strip comments and collapse whitespace; it now
+  drops only lineage-tag lines and puts the `meta [...]` bag in canonical
+  order, so a changed doc comment or `//` comment is drift. A name declared
+  more than once is compared on every declaration, and the fix rewrites
+  each differing declaration with its own lineage tag kept.
+- **Baseline snapshot format 3.** Run `drift-doctor capture` once after
+  upgrading; the ledger is kept as is.
+
 ### Fixed
 
 - **A table's last column no longer carries its refresh policy.** Copying
@@ -12,6 +38,13 @@
   spinout; removing one deleted the spinout's policy. `refreshPolicy`,
   `calculationGroup`, `changedProperty` and `extendedProperty` now end a
   block too.
+- **A doc comment stays with its own expression.** Replacing a shared
+  expression carried the `///` comment of the NEXT expression along with
+  it, so that comment ended up documenting an unrelated parameter. A run of
+  column-0 `///` lines now belongs to the declaration below it.
+- **A stray `table` line ends a block**, so a malformed concatenated file
+  can no longer make one object swallow the next table. Inserting a measure
+  block written at column 0 now indents it to object depth.
 
 ## v1.1.0 (2026-10-12)
 

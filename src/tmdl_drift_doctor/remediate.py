@@ -65,6 +65,11 @@ class FileChange:
             a, b, fromfile=f"a/{label}", tofile=f"b/{label}"))
 
 
+class _Skip(Exception):
+    """Raised by an applier that decides, on the live files, that the fix
+    must not run; the finding is reported skipped with this reason."""
+
+
 @dataclass
 class Outcome:
     finding: Finding
@@ -156,28 +161,61 @@ def _apply_column(fleet: Fleet, f: Finding) -> tuple:
     return _cascade_object(fleet, f, "column", te.insert_column_block)
 
 
-def _apply_expression(fleet: Fleet, f: Finding) -> tuple:
-    derived, template = _model_paths(fleet, f)
-    t_file = template / "expressions.tmdl"
-    block = te.extract_expression_block(
-        t_file.read_text(encoding="utf-8"), f.ref)
+def _template_expression_block(fleet: Fleet, name: str) -> str:
+    t_file = fleet.template_definition / "expressions.tmdl"
+    text = t_file.read_text(encoding="utf-8") if t_file.exists() else ""
+    block = te.extract_expression_block(text, name)
     if block is None:
         raise DriftDoctorError(
-            f"template expressions.tmdl no longer defines '{f.ref}' — stale "
+            f"template expressions.tmdl no longer defines '{name}' — stale "
             f"baseline; run `drift-doctor capture`")
+    return block
+
+
+def _apply_expression(fleet: Fleet, f: Finding) -> tuple:
+    """Overwrite every declaration of an allowlisted shared expression that
+    differs from the template's, each keeping its own lineage tag."""
+    from .tmdl import expression_form
+    derived, _ = _model_paths(fleet, f)
+    block = _template_expression_block(fleet, f.ref)
+    wanted = expression_form(block)
     d_file = derived / "expressions.tmdl"
-    d_content = d_file.read_text(encoding="utf-8") if d_file.exists() else ""
-    existing = te.extract_expression_block(d_content, f.ref)
-    if existing is None:
-        block = te.regenerate_lineage_tag(block)
-    else:
-        tag = te.first_lineage_tag(existing)
-        block = te.set_first_lineage_tag(block, tag) if tag \
-            else te.regenerate_lineage_tag(block)
-    new = te.replace_or_append_expression(d_content, f.ref, block)
+    if not d_file.exists():
+        raise DriftDoctorError(
+            f"{d_file} does not exist: the model changed after detection. "
+            f"Re-run `drift-doctor detect`.")
+    d_content = d_file.read_text(encoding="utf-8")
+
+    def rewrite(old: str) -> str:
+        if expression_form(old) == wanted:
+            return old
+        tag = te.first_lineage_tag(old)
+        return (te.set_first_lineage_tag(block, tag) if tag
+                else te.regenerate_lineage_tag(block))
+
+    new = te.replace_expression_blocks(d_content, f.ref, rewrite)
     return (f"cascade shared expression '{f.ref}' from template "
-            f"(allowlist-named; everything else untouched)",
+            f"(allowlist-named; lineage tag kept; everything else untouched)",
             [FileChange(d_file, d_content, new)])
+
+
+CONNECTION_HINT = ("copy the declaration from the template and set this "
+                   "model's own value")
+
+
+def _apply_expression_missing(fleet: Fleet, f: Finding) -> tuple:
+    if f.ref in fleet.connection_parameters:
+        raise _Skip(f"'{f.ref}' is a connection parameter and is never "
+                    f"written by remediation: {CONNECTION_HINT}")
+    derived, _ = _model_paths(fleet, f)
+    block = te.regenerate_lineage_tag(_template_expression_block(fleet, f.ref))
+    d_file = derived / "expressions.tmdl"
+    old = d_file.read_text(encoding="utf-8") if d_file.exists() else None
+    if old is not None and te.expression_block_span(old, f.ref) is not None:
+        return ("expression already present", [])
+    new = te.append_expression_block(old or "", block)
+    return (f"add template expression '{f.ref}' after the existing blocks "
+            f"(fresh lineage tag)", [FileChange(d_file, old, new)])
 
 
 def _apply_mapping_row_missing(fleet: Fleet, f: Finding) -> tuple:
@@ -364,6 +402,7 @@ APPLIERS: dict = {
     "relationship.modified": _apply_relationship_modified,
     "retire.relationship": _apply_retire_relationship,
     "expression.drift": _apply_expression,
+    "expression.missing": _apply_expression_missing,
     "mapping_row.missing": _apply_mapping_row_missing,
     "retire.table": _apply_retire_table,
     "retire.column": _apply_retire_column,
@@ -552,7 +591,8 @@ PRECONDITIONS: dict = {
 # Dependency order: what later fixes rely on comes first.
 PHASES = (
     "table.missing", "column.missing", "column.property_drift",
-    "expression.drift", "mapping_row.missing", "measure.missing",
+    "expression.drift", "expression.missing", "mapping_row.missing",
+    "measure.missing",
     "measure.wrong_host", "measure.expression_drift", "measure.property_drift",
     "relationship.missing", "relationship.modified",
     "retire.relationship", "retire.measure", "retire.mapping_row",
@@ -560,8 +600,10 @@ PHASES = (
 )
 
 
-def _phase(f: Finding) -> int:
-    return PHASES.index(f.kind) if f.kind in PHASES else len(PHASES)
+def _phase(f: Finding) -> tuple:
+    rank = PHASES.index(f.kind) if f.kind in PHASES else len(PHASES)
+    # template-only expressions are added in alphabetical order
+    return (rank, f.ref if f.kind == "expression.missing" else "")
 
 
 # ───────────────────────── engine ─────────────────────────
@@ -629,7 +671,11 @@ def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
                 result.outcomes.append(Outcome(f, "auto_skipped_precondition",
                                                reason))
                 continue
-            label, changes = APPLIERS[f.kind](fleet, f)
+            try:
+                label, changes = APPLIERS[f.kind](fleet, f)
+            except _Skip as skip:
+                result.outcomes.append(Outcome(f, "skipped", str(skip)))
+                continue
             for c in changes:
                 if c.new is not None and c.path.suffix == ".tmdl":
                     te.assert_tmdl_valid(c.new)   # guard BEFORE any write
