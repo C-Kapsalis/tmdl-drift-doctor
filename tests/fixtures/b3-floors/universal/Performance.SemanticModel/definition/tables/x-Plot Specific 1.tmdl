@@ -1,0 +1,33 @@
+table 'x-Plot Specific 1'
+	lineageTag: b3f10000-0000-4000-8000-000000000046
+
+	column 'x-Plot Specific 1'
+		dataType: string
+		lineageTag: b3f10000-0000-4000-8000-000000000042
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'x-Plot Specific 1 Order'
+
+	column 'x-Plot Specific 1 Fields'
+		dataType: string
+		isHidden
+		lineageTag: b3f10000-0000-4000-8000-000000000043
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+	column 'x-Plot Specific 1 Order'
+		dataType: int64
+		isHidden
+		lineageTag: b3f10000-0000-4000-8000-000000000044
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	partition 'x-Plot Specific 1' = calculated
+		mode: import
+		source =
+				{
+				    ("Revenue", NAMEOF('Sales'[amount]), 0),
+				    ("Orders", NAMEOF('Sales'[order_id]), 1)
+				}
+
+	annotation PBI_Id = b3f10000000040008000000000000045

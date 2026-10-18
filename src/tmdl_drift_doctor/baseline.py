@@ -23,10 +23,11 @@ history erased.
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import StaleBaselineError
+from . import StaleBaselineError, __version__
 from .fleet import Fleet
 from .ledger import Ledger
 from .tmdl import Model, normalize_expression, parse_mapping_rows, parse_model
@@ -34,8 +35,10 @@ from .tmdl import Model, normalize_expression, parse_mapping_rows, parse_model
 SNAPSHOT_VERSION = 3
 
 
-def build_snapshot(model: Model, mapping_tables: list) -> dict:
-    """Reduce a parsed model to its comparable JSON form."""
+def build_snapshot(model: Model, mapping_tables: list, config=None,
+                   with_metrics: bool = True) -> dict:
+    """Reduce a parsed model to its comparable JSON form (plus, for the
+    template, the metrics the count floors and reports are built on)."""
     tables: dict = {}
     mapping_rows: dict = {}
     for tname, table in sorted(model.tables.items()):
@@ -52,7 +55,7 @@ def build_snapshot(model: Model, mapping_tables: list) -> dict:
             for part in table.partitions.values():
                 rows.update(parse_mapping_rows(part.source))
             mapping_rows[tname] = rows
-    return {
+    snap = {
         "version": SNAPSHOT_VERSION,
         "tables": tables,
         "expressions": dict(sorted(model.expressions.items())),
@@ -60,11 +63,44 @@ def build_snapshot(model: Model, mapping_tables: list) -> dict:
         "relationships": {sig: dict(rel.properties)
                           for sig, rel in sorted(model.relationships.items())},
     }
+    if with_metrics:
+        from .metrics import compute_metrics
+        from .sources import identity, table_source_views
+        metrics = compute_metrics(model, config)
+        snap["metrics"] = metrics
+        snap["fact_tables"] = list(metrics["fact_tables"])
+        snap["table_source_views"] = table_source_views(model,
+                                                        identity(config))
+    return snap
 
 
 def _comparable(snapshot: dict) -> dict:
     """The snapshot minus capture metadata — what equality is judged on."""
-    return {k: v for k, v in snapshot.items() if not k.startswith("captured")}
+    return {k: v for k, v in snapshot.items()
+            if not k.startswith("captured") and k != "provenance"}
+
+
+def _git(path: Path, *args) -> str | None:
+    try:
+        r = subprocess.run(["git", "-C", str(path), *args],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip()
+    return out if r.returncode == 0 and out else None
+
+
+def provenance(fleet: Fleet, captured_at: str) -> dict:
+    """Where the baseline came from. ``template_tree`` (the git tree of the
+    template folder at HEAD) survives squash merges and is what freshness
+    checks may assert; ``template_commit`` is informational only."""
+    return {
+        "template_tree": _git(fleet.template, "rev-parse", "HEAD:./"),
+        "template_commit": _git(fleet.template, "log", "-1", "--format=%H",
+                                "--", "."),
+        "captured_at": captured_at,
+        "generator": f"tmdl-drift-doctor {__version__}",
+    }
 
 
 def load_baseline(fleet: Fleet) -> dict:
@@ -87,7 +123,7 @@ def ensure_baseline_fresh(fleet: Fleet, baseline: dict) -> None:
             f"`drift-doctor "
             f"capture` once to upgrade it; the ledger is kept as is.")
     live = build_snapshot(parse_model(fleet.template_definition),
-                          fleet.mapping_tables)
+                          fleet.mapping_tables, fleet.raw)
     if _comparable(live) != _comparable(baseline):
         raise StaleBaselineError(
             "the template has changed since the last capture — the committed "
@@ -179,7 +215,7 @@ def capture(fleet: Fleet) -> dict:
 
     Returns a summary dict for the CLI."""
     fresh = build_snapshot(parse_model(fleet.template_definition),
-                           fleet.mapping_tables)
+                           fleet.mapping_tables, fleet.raw)
     ledger = Ledger(fleet.ledger_path)
     changes = {"retired": [], "revived": []}
     path = fleet.baseline_path
@@ -187,7 +223,9 @@ def capture(fleet: Fleet) -> dict:
         prev = json.loads(path.read_text(encoding="utf-8"))
         changes = update_retirements(prev, fresh, ledger)
 
-    fresh["captured_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    fresh["captured_at"] = stamp
+    fresh["provenance"] = provenance(fleet, stamp)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(fresh, indent=2, ensure_ascii=False) + "\n",
                     encoding="utf-8")

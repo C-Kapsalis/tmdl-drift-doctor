@@ -22,6 +22,7 @@ The doctrine that shapes the kinds:
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from .fleet import Fleet, Override, kind_matches
 from .ledger import Ledger
 from .tmdl import (
     Model,
+    blank_strings,
     dax_references,
     normalize_expression,
     parse_model,
@@ -53,6 +55,7 @@ REMEDIABLE_KINDS = (
     "mapping_row.missing",
     "relationship.missing",
     "relationship.modified",
+    "relationship.casing_mismatch",
     "retire.table",
     "retire.column",
     "retire.measure",
@@ -68,6 +71,10 @@ ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra",
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
                             "retire.mapping_row", "retire.relationship")
+
+# Kinds that fail a gate whatever `allowlist.kinds` says: a model that lost
+# a whole axis table, or live DAX naming a retired table, is never backlog.
+ALWAYS_GATING = ("model.count_below_template", "retire.stranded_ref")
 
 JSON_SCHEMA_VERSION = 2
 
@@ -105,7 +112,12 @@ class Finding:
             "derived_value": self.derived_value,
             "detail": self.detail,
             "advisory": self.advisory,
+            "remediable": self.kind in REMEDIABLE_KINDS,
         }
+        data = {k: v for k, v in (self.data or {}).items()
+                if k not in ("blocked", "row")}
+        if data:
+            d["data"] = data
         if self.blocked:
             d["blocked"] = self.blocked
         if self.override is not None:
@@ -117,8 +129,8 @@ def is_actionable(f: Finding, fleet: Fleet) -> bool:
     """THE predicate shared by detect's exit code, the ratchet and review:
     a finding is actionable when its kind is allowlisted, it is not
     advisory, and no override acknowledges it."""
-    return (fleet.allows(f.kind) and not f.advisory
-            and not f.overridden)
+    return ((fleet.allows(f.kind) or f.kind in ALWAYS_GATING)
+            and not f.advisory and not f.overridden)
 
 
 def is_gating(f: Finding, fleet: Fleet) -> bool:
@@ -355,8 +367,16 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
 
     # ── relationships (template -> derived), matched on field signature ──
     b_rels = baseline.get("relationships") or {}
+    by_folded = {sig.casefold(): sig for sig in model.relationships}
+    seen_derived: set = set()
     for sig, props in b_rels.items():
         rel = model.relationships.get(sig)
+        if rel is None and sig.casefold() in by_folded:
+            # same relationship spelled with another casing: one casing
+            # finding per mismatching endpoint part, never a "missing" one
+            rel = model.relationships[by_folded[sig.casefold()]]
+        if rel is not None:
+            seen_derived.add(rel.signature)
         if rel is None:
             findings.append(Finding(
                 kind="relationship.missing", model=name, ref=sig,
@@ -371,6 +391,7 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                 derived_value=_fmt_rel(rel.properties),
                 detail=(f"relationship {sig} properties differ from the "
                         f"template (overwrite keeps '{name}''s block name)")))
+    findings.extend(_casing_findings(name, model, baseline))
 
     # ── extras (derived -> template) ──
     for tname, derived in live["tables"].items():
@@ -401,7 +422,8 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                         f"with no template counterpart; advisory only "
                         f"(never auto-deleted)")))
     for sig, rel in model.relationships.items():
-        if sig in b_rels or ("relationship", sig) in retire:
+        if sig in b_rels or sig in seen_derived \
+                or ("relationship", sig) in retire:
             continue
         if rel.from_table in b_tables and rel.to_table in b_tables:
             findings.append(Finding(
@@ -412,7 +434,96 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
 
     # ── retirements (ledger-proven), with the coupling guard ──
     findings.extend(_retirements(name, model, live, baseline, retire))
+    findings.extend(_stranded_refs(name, model, ledger))
+
+    # ── count floors against the template's captured metrics ──
+    from .metrics import COUNT_KIND, count_floor_findings
+    for data, detail in count_floor_findings(
+            name, model, baseline.get("metrics"), fleet.raw,
+            fleet.overrides.get(name)):
+        ref = data["metric"] + (f":{data['table']}" if data.get("table")
+                                else f":{data['prefix']}" if data.get("prefix")
+                                else "")
+        findings.append(Finding(kind=COUNT_KIND, model=name, ref=ref,
+                                template_value=_none_or_str(data["floor"]),
+                                derived_value=str(data["client"]),
+                                detail=detail, data=data))
     return findings
+
+
+def _none_or_str(v):
+    return None if v is None else str(v)
+
+
+def _casing_findings(name: str, model: Model, baseline: dict) -> list:
+    """``relationship.casing_mismatch``: an endpoint whose table or column
+    exists in the template under another casing. One finding per
+    mismatching part; endpoints on derived-only tables are ignored."""
+    b_tables = baseline.get("tables") or {}
+    tables = {t.casefold(): t for t in b_tables}
+    out = []
+    for sig, rel in sorted(model.relationships.items()):
+        for end, table, col in (("from", rel.from_table, rel.from_column),
+                                ("to", rel.to_table, rel.to_column)):
+            canon_t = tables.get(table.casefold())
+            if canon_t is None:
+                continue
+            cols = {c.casefold(): c for c in
+                    (b_tables[canon_t].get("columns") or {})}
+            canon_c = cols.get(col.casefold(), col)
+            for part, found, canon in (("table", table, canon_t),
+                                       ("column", col, canon_c)):
+                if found != canon:
+                    out.append(Finding(
+                        kind="relationship.casing_mismatch", model=name,
+                        ref=f"{sig} ({end} {part})",
+                        template_value=canon, derived_value=found,
+                        detail=(f"relationship {sig}: {end} {part} is "
+                                f"spelled '{found}' but the template spells "
+                                f"it '{canon}' ({canon_t}[{canon_c}])"),
+                        data={"signature": sig, "end": end, "part": part,
+                              "table": canon_t, "column": canon_c}))
+    return out
+
+
+_SENSORS = ("ISFILTERED", "ISCROSSFILTERED", "HASONEVALUE", "HASONEFILTER",
+            "ISEMPTY", "ISINSCOPE")
+
+
+def _stranded_refs(name: str, model: Model, ledger: Ledger) -> list:
+    """``retire.stranded_ref``: live DAX that still names a table the ledger
+    retired and the model no longer declares."""
+    gone = sorted({ref for (kind, ref) in ledger.active_retirements(name)
+                   if kind == "table" and ref not in model.tables})
+    if not gone:
+        return []
+    out = []
+    for tname, table in model.tables.items():
+        objs = [("measure", m.name, m.expression) for m in table.measures.values()]
+        objs += [("column", c.name, c.expression) for c in table.columns.values()
+                 if c.expression]
+        for kind, oname, expr in objs:
+            live = blank_strings(expr or "")
+            for dead in gone:
+                quoted = "'" + dead.replace("'", "''") + "'"
+                bare = re.escape(dead)
+                if quoted not in live and not re.search(
+                        rf"(?<![\w']){bare}\[", live):
+                    continue
+                sensor = re.compile(r"\b(?:" + "|".join(_SENSORS)
+                                    + r")\s*\(\s*$", re.IGNORECASE)
+                sensor_only = all(sensor.search(live[:m.start()])
+                                  for m in re.finditer(re.escape(quoted), live))
+                out.append(Finding(
+                    kind="retire.stranded_ref", model=name,
+                    ref=f"{tname}[{oname}]",
+                    detail=(f"{kind} {tname}[{oname}] still references the "
+                            f"ledger-retired table '{dead}', which '{name}' "
+                            f"no longer declares (unresolvable DAX)"),
+                    data={"table": tname, "object": oname, "object_kind": kind,
+                          "retired_table": dead,
+                          "sensor_only": bool(sensor_only)}))
+    return out
 
 
 def _one_line(form: str) -> str:
@@ -710,7 +821,7 @@ def _fmt_rel(props: dict) -> str:
 def _live_view(model: Model, mapping_tables: list) -> dict:
     """The same comparable shape build_snapshot produces, from a live parse."""
     from .baseline import build_snapshot
-    snap = build_snapshot(model, mapping_tables)
+    snap = build_snapshot(model, mapping_tables, with_metrics=False)
     return {
         "tables": snap["tables"],
         "expressions": model.expressions,

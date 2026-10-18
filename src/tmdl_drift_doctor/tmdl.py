@@ -134,6 +134,7 @@ class Partition:
     name: str
     table: str
     source: str = ""         # raw source expression text
+    mode: str = ""           # the word after '=': m, calculated, entity...
 
 
 @dataclass
@@ -340,7 +341,8 @@ def parse_table_file(path: Path) -> Table:
                     continue
                 j += 1
             table.partitions[name] = Partition(name=name, table=table_name,
-                                               source=src)
+                                               source=src,
+                                               mode=inline.strip())
             i = j
         else:  # hierarchy: record which columns its levels use
             levels: list = []

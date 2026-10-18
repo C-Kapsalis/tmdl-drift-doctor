@@ -1,0 +1,14 @@
+table 'Helper Measures'
+	lineageTag: b3f10000-0000-4000-8000-000000000036
+
+	measure '-helper Margin Base' = SUM(Sales[amount]) - SUM(Sales[discount])
+		formatString: #,0.00
+		lineageTag: b3f10000-0000-4000-8000-000000000034
+
+	measure '-helper Order Base' = COUNTROWS(Sales)
+		formatString: #,0
+		lineageTag: b3f10000-0000-4000-8000-000000000035
+
+	partition 'Helper Measures' = calculated
+		mode: import
+		source = ROW("Column", BLANK())

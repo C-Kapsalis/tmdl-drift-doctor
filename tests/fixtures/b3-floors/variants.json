@@ -1,0 +1,340 @@
+{
+ "clean": [],
+ "measure_drop": [
+  {
+   "op": "replace",
+   "path": "tables/Sales.tmdl",
+   "old": "\tmeasure 'Order Count' = COUNTROWS(Sales)\n\t\tformatString: #,0\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000017\n\n",
+   "new": ""
+  }
+ ],
+ "measure_extra": [
+  {
+   "op": "replace",
+   "path": "tables/Sales.tmdl",
+   "old": "\tmeasure 'Discount Share'",
+   "new": "\tmeasure 'Average Order' = DIVIDE([Total Revenue], [Order Count])\n\t\tformatString: #,0.00\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000058\n\n\tmeasure 'Discount Share'"
+  }
+ ],
+ "nameof_drop": [
+  {
+   "op": "replace",
+   "path": "tables/#Report Measures.tmdl",
+   "old": "\tmeasure 'Discount Field Name' = NAMEOF(Sales[discount])\n\t\tformatString: General\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000028\n\n",
+   "new": ""
+  }
+ ],
+ "nameof_drop_absent": [
+  {
+   "op": "replace",
+   "path": "tables/#Report Measures.tmdl",
+   "old": "\tmeasure 'Discount Field Name' = NAMEOF(Sales[discount])\n\t\tformatString: General\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000028\n\n",
+   "new": ""
+  },
+  {
+   "op": "replace",
+   "path": "tables/Sales.tmdl",
+   "old": "\tcolumn discount\n\t\tdataType: double\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000014\n\t\tsummarizeBy: none\n\t\tsourceColumn: discount\n\n",
+   "new": ""
+  }
+ ],
+ "rel_drop": [
+  {
+   "op": "replace",
+   "path": "relationships.tmdl",
+   "old": "\nrelationship b3f1c001-0000-4000-8000-000000000003\n\tfromColumn: Sales.order_date\n\ttoColumn: __Calendar.Date\n",
+   "new": ""
+  }
+ ],
+ "rel_extra": [
+  {
+   "op": "write",
+   "path": "tables/Loyalty.tmdl",
+   "text": "table Loyalty\n\tlineageTag: b3f10000-0000-4000-8000-000000000061\n\n\tcolumn loyalty_id\n\t\tdataType: int64\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000059\n\t\tsummarizeBy: none\n\t\tsourceColumn: loyalty_id\n\n\tcolumn tier\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000060\n\t\tsummarizeBy: none\n\t\tsourceColumn: tier\n\n\tpartition Loyalty = m\n\t\tmode: import\n\t\tsource =\n\t\t\t\tlet\n\t\t\t\t    Source = Sql.Database(\"bike-shop-db\", \"shop\"),\n\t\t\t\t    Data = Source{[Schema=\"dbo\",Item=\"v_loyalty\"]}[Data]\n\t\t\t\tin\n\t\t\t\t    Data\n"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table Sales\n",
+   "new": "ref table Sales\nref table Loyalty\n"
+  },
+  {
+   "op": "replace",
+   "path": "tables/Sales.tmdl",
+   "old": "\tcolumn amount\n",
+   "new": "\tcolumn loyalty_id\n\t\tdataType: int64\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000062\n\t\tsummarizeBy: none\n\t\tsourceColumn: loyalty_id\n\n\tcolumn amount\n"
+  },
+  {
+   "op": "replace",
+   "path": "relationships.tmdl",
+   "old": "\nrelationship b3f1c001-0000-4000-8000-000000000003\n\tfromColumn: Sales.order_date\n\ttoColumn: __Calendar.Date\n",
+   "new": "\nrelationship b3f1c001-0000-4000-8000-000000000003\n\tfromColumn: Sales.order_date\n\ttoColumn: __Calendar.Date\n\nrelationship b3f1c001-0000-4000-8000-000000000004\n\tfromColumn: Sales.loyalty_id\n\ttoColumn: Loyalty.loyalty_id\n"
+  }
+ ],
+ "m2o_drop": [
+  {
+   "op": "replace",
+   "path": "relationships.tmdl",
+   "old": "\tfromColumn: Sales.order_date\n",
+   "new": "\tfromCardinality: one\n\tfromColumn: Sales.order_date\n"
+  }
+ ],
+ "casing": [
+  {
+   "op": "replace",
+   "path": "relationships.tmdl",
+   "old": "\ttoColumn: _Stores.store_id\n",
+   "new": "\ttoColumn: _stores.Store_Id\n"
+  }
+ ],
+ "casing_client_only": [
+  {
+   "op": "write",
+   "path": "tables/Loyalty.tmdl",
+   "text": "table Loyalty\n\tlineageTag: b3f10000-0000-4000-8000-000000000061\n\n\tcolumn loyalty_id\n\t\tdataType: int64\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000059\n\t\tsummarizeBy: none\n\t\tsourceColumn: loyalty_id\n\n\tcolumn tier\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000060\n\t\tsummarizeBy: none\n\t\tsourceColumn: tier\n\n\tpartition Loyalty = m\n\t\tmode: import\n\t\tsource =\n\t\t\t\tlet\n\t\t\t\t    Source = Sql.Database(\"bike-shop-db\", \"shop\"),\n\t\t\t\t    Data = Source{[Schema=\"dbo\",Item=\"v_loyalty\"]}[Data]\n\t\t\t\tin\n\t\t\t\t    Data\n"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table Sales\n",
+   "new": "ref table Sales\nref table Loyalty\n"
+  },
+  {
+   "op": "replace",
+   "path": "tables/Sales.tmdl",
+   "old": "\tcolumn amount\n",
+   "new": "\tcolumn loyalty_id\n\t\tdataType: int64\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000062\n\t\tsummarizeBy: none\n\t\tsourceColumn: loyalty_id\n\n\tcolumn amount\n"
+  },
+  {
+   "op": "replace",
+   "path": "relationships.tmdl",
+   "old": "\nrelationship b3f1c001-0000-4000-8000-000000000003\n\tfromColumn: Sales.order_date\n\ttoColumn: __Calendar.Date\n",
+   "new": "\nrelationship b3f1c001-0000-4000-8000-000000000003\n\tfromColumn: Sales.order_date\n\ttoColumn: __Calendar.Date\n\nrelationship b3f1c001-0000-4000-8000-000000000004\n\tfromColumn: Sales.loyalty_id\n\ttoColumn: loyalty.LOYALTY_ID\n"
+  }
+ ],
+ "fam_missing_xps": [
+  {
+   "op": "delete",
+   "path": "tables/x-Plot Specific 1.tmdl"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table 'x-Plot Specific 1'\n",
+   "new": ""
+  }
+ ],
+ "fam_missing_yps": [
+  {
+   "op": "delete",
+   "path": "tables/y-Plot Specific 1.tmdl"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table 'y-Plot Specific 1'\n",
+   "new": ""
+  }
+ ],
+ "ycols_drop": [
+  {
+   "op": "replace",
+   "path": "tables/y-Selector 1.tmdl",
+   "old": "\tcolumn 'y-Selector 1 Category'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000050\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value4]\n\n",
+   "new": ""
+  }
+ ],
+ "ycols_rename": [
+  {
+   "op": "replace",
+   "path": "tables/y-Selector 1.tmdl",
+   "old": "\tcolumn 'y-Selector 1 Category'\n",
+   "new": "\tcolumn 'y-Selector 1 Group'\n"
+  }
+ ],
+ "ycols_swap": [
+  {
+   "op": "replace",
+   "path": "tables/y-Selector 1.tmdl",
+   "old": "\tcolumn 'y-Selector 1 Category'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000050\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value4]\n\n",
+   "new": "\tcolumn 'y-Selector 1 Sort Key'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-999999999901\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value4]\n\n"
+  }
+ ],
+ "y_client_only": [
+  {
+   "op": "write",
+   "path": "tables/y-Selector 9.tmdl",
+   "text": "table 'y-Selector 9'\n\tlineageTag: b3f10000-0000-4000-8000-000000000067\n\n\tcolumn 'y-Selector 9'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000063\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value1]\n\t\tsortByColumn: 'y-Selector 9 Order'\n\n\tcolumn 'y-Selector 9 Fields'\n\t\tdataType: string\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000064\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value2]\n\n\tcolumn 'y-Selector 9 Order'\n\t\tdataType: int64\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000065\n\t\tsummarizeBy: sum\n\t\tsourceColumn: [Value3]\n\n\tpartition 'y-Selector 9' = calculated\n\t\tmode: import\n\t\tsource =\n\t\t\t\t{\n\t\t\t\t    (\"Revenue\", NAMEOF('Sales'[amount]), 0),\n\t\t\t\t    (\"Orders\", NAMEOF('Sales'[order_id]), 1)\n\t\t\t\t}\n\n\tannotation PBI_Id = b3f10000000040008000000000000066\n"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table 'x-Selector 1'\n",
+   "new": "ref table 'y-Selector 9'\nref table 'x-Selector 1'\n"
+  }
+ ],
+ "xcols_drop": [
+  {
+   "op": "replace",
+   "path": "tables/x-Selector 1.tmdl",
+   "old": "\tcolumn 'x-Selector 1 Order'\n\t\tdataType: int64\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000039\n\t\tsummarizeBy: sum\n\t\tsourceColumn: [Value3]\n\n",
+   "new": ""
+  },
+  {
+   "op": "replace",
+   "path": "tables/x-Selector 1.tmdl",
+   "old": "\t\tsortByColumn: 'x-Selector 1 Order'\n",
+   "new": ""
+  }
+ ],
+ "x_client_only_cols": [
+  {
+   "op": "write",
+   "path": "tables/x-Selector 9.tmdl",
+   "text": "table 'x-Selector 9'\n\tlineageTag: b3f10000-0000-4000-8000-000000000072\n\n\tcolumn 'x-Selector 9'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000068\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value1]\n\t\tsortByColumn: 'x-Selector 9 Order'\n\n\tcolumn 'x-Selector 9 Fields'\n\t\tdataType: string\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000069\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value2]\n\n\tcolumn 'x-Selector 9 Order'\n\t\tdataType: int64\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000070\n\t\tsummarizeBy: sum\n\t\tsourceColumn: [Value3]\n\n\tpartition 'x-Selector 9' = calculated\n\t\tmode: import\n\t\tsource =\n\t\t\t\t{\n\t\t\t\t    (\"Revenue\", NAMEOF('Sales'[amount]), 0),\n\t\t\t\t    (\"Orders\", NAMEOF('Sales'[order_id]), 1)\n\t\t\t\t}\n\n\tannotation PBI_Id = b3f10000000040008000000000000071\n"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table 'x-Selector 1'\n",
+   "new": "ref table 'x-Selector 9'\nref table 'x-Selector 1'\n"
+  }
+ ],
+ "xref_drop": [
+  {
+   "op": "replace",
+   "path": "tables/#Report Measures.tmdl",
+   "old": "\tmeasure 'Plot Field' = SELECTEDVALUE('x-Plot Specific 1'[x-Plot Specific 1 Fields])\n\t\tformatString: General\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000024\n\n",
+   "new": ""
+  }
+ ],
+ "yref_drop": [
+  {
+   "op": "replace",
+   "path": "tables/#Report Measures.tmdl",
+   "old": "\tmeasure 'Y Axis Category' = SELECTEDVALUE('y-Selector 1'[y-Selector 1 Category])\n\t\tformatString: General\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000026\n\n",
+   "new": ""
+  }
+ ],
+ "x_client_unused": [
+  {
+   "op": "write",
+   "path": "tables/x-Selector 7.tmdl",
+   "text": "table 'x-Selector 7'\n\tlineageTag: b3f10000-0000-4000-8000-000000000077\n\n\tcolumn 'x-Selector 7'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000073\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value1]\n\t\tsortByColumn: 'x-Selector 7 Order'\n\n\tcolumn 'x-Selector 7 Fields'\n\t\tdataType: string\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000074\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value2]\n\n\tcolumn 'x-Selector 7 Order'\n\t\tdataType: int64\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000075\n\t\tsummarizeBy: sum\n\t\tsourceColumn: [Value3]\n\n\tpartition 'x-Selector 7' = calculated\n\t\tmode: import\n\t\tsource =\n\t\t\t\t{\n\t\t\t\t    (\"Revenue\", NAMEOF('Sales'[amount]), 0),\n\t\t\t\t    (\"Orders\", NAMEOF('Sales'[order_id]), 1)\n\t\t\t\t}\n\n\tannotation PBI_Id = b3f10000000040008000000000000076\n"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table 'x-Selector 1'\n",
+   "new": "ref table 'x-Selector 7'\nref table 'x-Selector 1'\n"
+  }
+ ],
+ "y_client_unused": [
+  {
+   "op": "write",
+   "path": "tables/y-Selector 7.tmdl",
+   "text": "table 'y-Selector 7'\n\tlineageTag: b3f10000-0000-4000-8000-000000000082\n\n\tcolumn 'y-Selector 7'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000078\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value1]\n\t\tsortByColumn: 'y-Selector 7 Order'\n\n\tcolumn 'y-Selector 7 Fields'\n\t\tdataType: string\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000079\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value2]\n\n\tcolumn 'y-Selector 7 Order'\n\t\tdataType: int64\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000080\n\t\tsummarizeBy: sum\n\t\tsourceColumn: [Value3]\n\n\tpartition 'y-Selector 7' = calculated\n\t\tmode: import\n\t\tsource =\n\t\t\t\t{\n\t\t\t\t    (\"Revenue\", NAMEOF('Sales'[amount]), 0),\n\t\t\t\t    (\"Orders\", NAMEOF('Sales'[order_id]), 1)\n\t\t\t\t}\n\n\tannotation PBI_Id = b3f10000000040008000000000000081\n"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table 'x-Selector 1'\n",
+   "new": "ref table 'y-Selector 7'\nref table 'x-Selector 1'\n"
+  }
+ ],
+ "xref_ten": [
+  {
+   "op": "write",
+   "path": "tables/x-Selector 10.tmdl",
+   "text": "table 'x-Selector 10'\n\tlineageTag: b3f10000-0000-4000-8000-000000000087\n\n\tcolumn 'x-Selector 10'\n\t\tdataType: string\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000083\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value1]\n\t\tsortByColumn: 'x-Selector 10 Order'\n\n\tcolumn 'x-Selector 10 Fields'\n\t\tdataType: string\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000084\n\t\tsummarizeBy: none\n\t\tsourceColumn: [Value2]\n\n\tcolumn 'x-Selector 10 Order'\n\t\tdataType: int64\n\t\tisHidden\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000085\n\t\tsummarizeBy: sum\n\t\tsourceColumn: [Value3]\n\n\tpartition 'x-Selector 10' = calculated\n\t\tmode: import\n\t\tsource =\n\t\t\t\t{\n\t\t\t\t    (\"Revenue\", NAMEOF('Sales'[amount]), 0),\n\t\t\t\t    (\"Orders\", NAMEOF('Sales'[order_id]), 1)\n\t\t\t\t}\n\n\tannotation PBI_Id = b3f10000000040008000000000000086\n"
+  },
+  {
+   "op": "replace",
+   "path": "model.tmdl",
+   "old": "ref table 'x-Selector 1'\n",
+   "new": "ref table 'x-Selector 10'\nref table 'x-Selector 1'\n"
+  },
+  {
+   "op": "replace",
+   "path": "tables/#Report Measures.tmdl",
+   "old": "\tmeasure 'Plot Label'",
+   "new": "\tmeasure 'Wide Axis Label' = SELECTEDVALUE('x-Selector 10'[x-Selector 10])\n\t\tformatString: General\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000088\n\n\tmeasure 'Plot Label'"
+  }
+ ],
+ "f_drop": [
+  {
+   "op": "replace",
+   "path": "tables/f-Filters.tmdl",
+   "old": "\tmeasure 'f-Stores' = INT(NOT ISEMPTY(_Stores))\n\t\tformatString: 0\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000032\n\n",
+   "new": ""
+  }
+ ],
+ "helper_drop": [
+  {
+   "op": "replace",
+   "path": "tables/Helper Measures.tmdl",
+   "old": "\tmeasure '-helper Margin Base' = SUM(Sales[amount]) - SUM(Sales[discount])\n\t\tformatString: #,0.00\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000034\n\n",
+   "new": ""
+  }
+ ],
+ "column_absent": [
+  {
+   "op": "replace",
+   "path": "tables/Sales.tmdl",
+   "old": "\tcolumn discount\n\t\tdataType: double\n\t\tlineageTag: b3f10000-0000-4000-8000-000000000014\n\t\tsummarizeBy: none\n\t\tsourceColumn: discount\n\n",
+   "new": ""
+  }
+ ],
+ "bare": [
+  {
+   "op": "write",
+   "path": "relationships.tmdl",
+   "text": ""
+  },
+  {
+   "op": "write",
+   "path": "model.tmdl",
+   "text": "model Model\n\tculture: en-US\n\tdefaultPowerBIDataSourceVersion: powerBI_V3\n\nref table _Stores\n"
+  },
+  {
+   "op": "delete",
+   "path": "tables/_Products.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/__Calendar.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/Sales.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/#Report Measures.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/f-Filters.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/Helper Measures.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/x-Selector 1.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/x-Plot Specific 1.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/y-Selector 1.tmdl"
+  },
+  {
+   "op": "delete",
+   "path": "tables/y-Plot Specific 1.tmdl"
+  }
+ ]
+}

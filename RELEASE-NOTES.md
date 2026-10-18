@@ -40,6 +40,34 @@
   `allowlist.expressions` are configuration errors. Model entries accept
   `gating_reason`, `connection`, `family` and `workspace`.
 
+- **Count floors (`model.count_below_template`).** `capture` stores
+  template metrics in baseline.json (`metrics`: measures by class, fact
+  tables, DAX expressions, NAMEOF references, relationships, many-to-one
+  relationships, axis-family tables with their column and reference
+  counts). `detect` reports a model that holds fewer of any of them than the
+  template, with `data` = `{metric, client, template, adjustment, floor}`.
+  The NAMEOF floor is lowered by template references to columns the model
+  declares absent. Count floors fail a gate whatever `allowlist.kinds` says.
+  A reference to `x-Selector 10` counts only toward `x-Selector 10` (not
+  toward `x-Selector 1`).
+- **`relationship.casing_mismatch`.** A relationship endpoint whose table
+  or column exists in the template under another casing is reported once
+  per mismatching part, instead of as a missing plus an extra
+  relationship. The fix rewrites the endpoint to the template's spelling.
+- **`retire.stranded_ref`.** Live DAX that still names a table the ledger
+  retired and the model no longer declares is reported (comments are
+  ignored); it fails a gate whatever the allowlist says. Requesting the
+  check with an empty ledger is an error (exit 2).
+- **Baseline provenance.** baseline.json carries `provenance`
+  (`template_tree`, `template_commit`, `captured_at`, `generator`), plus
+  `fact_tables` and `table_source_views`.
+- **Cascade summary.** `detect` ends with one `[OK  ]`/`[GAP ]` line per
+  model and `Summary: <passing>/<total> models in cascade`; `detect --csv`
+  prints one row per model (`model,tables,measures,fact_tables,
+  filter_measures,user_facing,helpers,gaps,flagged,allowed,expr_drift,
+  col_drift,rel_drift`).
+- **`detect --json` findings carry `remediable` and `data`.**
+
 ### Changed
 
 - **Configuration errors exit 2 (breaking).** A malformed or unresolvable

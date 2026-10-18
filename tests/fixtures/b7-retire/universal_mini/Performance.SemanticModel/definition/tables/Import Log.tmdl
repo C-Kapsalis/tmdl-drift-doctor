@@ -1,0 +1,22 @@
+/// Load log of the warehouse import jobs (fixture table).
+table 'Import Log'
+	lineageTag: 6b7c0001-0000-4000-8000-000000000001
+
+	column job_id
+		dataType: string
+		lineageTag: 6b7c0001-0000-4000-8000-000000000002
+		summarizeBy: none
+		sourceColumn: job_id
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Import Log-0f1e2d3c' = m
+		mode: import
+		queryGroup: Dimensions
+		source =
+				let
+				    Source = source_filter_dates("report_import_log_data", "", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit")
+				in
+				    Source
+
+	annotation PBI_ResultType = Table

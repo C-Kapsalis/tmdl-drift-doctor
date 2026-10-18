@@ -1,0 +1,23 @@
+table _Products
+	lineageTag: b3f10000-0000-4000-8000-000000000006
+
+	column product_id
+		dataType: int64
+		lineageTag: b3f10000-0000-4000-8000-000000000004
+		summarizeBy: none
+		sourceColumn: product_id
+
+	column product_name
+		dataType: string
+		lineageTag: b3f10000-0000-4000-8000-000000000005
+		summarizeBy: none
+		sourceColumn: product_name
+
+	partition _Products = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("bike-shop-db", "shop"),
+				    Data = Source{[Schema="dbo",Item="v_products"]}[Data]
+				in
+				    Data

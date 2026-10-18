@@ -1,0 +1,11 @@
+relationship b3f1c001-0000-4000-8000-000000000001
+	fromColumn: Sales.store_id
+	toColumn: _Stores.store_id
+
+relationship b3f1c001-0000-4000-8000-000000000002
+	fromColumn: Sales.product_id
+	toColumn: _Products.product_id
+
+relationship b3f1c001-0000-4000-8000-000000000003
+	fromColumn: Sales.order_date
+	toColumn: __Calendar.Date

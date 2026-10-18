@@ -1,0 +1,64 @@
+table Sales
+	lineageTag: b3f10000-0000-4000-8000-000000000019
+
+	column order_id
+		dataType: int64
+		lineageTag: b3f10000-0000-4000-8000-000000000009
+		summarizeBy: none
+		sourceColumn: order_id
+
+	column store_id
+		dataType: int64
+		lineageTag: b3f10000-0000-4000-8000-000000000010
+		summarizeBy: none
+		sourceColumn: store_id
+
+	column product_id
+		dataType: int64
+		lineageTag: b3f10000-0000-4000-8000-000000000011
+		summarizeBy: none
+		sourceColumn: product_id
+
+	column order_date
+		dataType: dateTime
+		lineageTag: b3f10000-0000-4000-8000-000000000012
+		summarizeBy: none
+		sourceColumn: order_date
+
+	column amount
+		dataType: double
+		lineageTag: b3f10000-0000-4000-8000-000000000013
+		summarizeBy: none
+		sourceColumn: amount
+
+	column discount
+		dataType: double
+		lineageTag: b3f10000-0000-4000-8000-000000000014
+		summarizeBy: none
+		sourceColumn: discount
+
+	column 'Revenue Band' = IF(Sales[amount] > 100, "High", "Low")
+		dataType: string
+		lineageTag: b3f10000-0000-4000-8000-000000000015
+		summarizeBy: none
+
+	measure 'Total Revenue' = SUM(Sales[amount])
+		formatString: #,0.00
+		lineageTag: b3f10000-0000-4000-8000-000000000016
+
+	measure 'Order Count' = COUNTROWS(Sales)
+		formatString: #,0
+		lineageTag: b3f10000-0000-4000-8000-000000000017
+
+	measure 'Discount Share' = DIVIDE(SUM(Sales[discount]), [Total Revenue])
+		formatString: 0.0%
+		lineageTag: b3f10000-0000-4000-8000-000000000018
+
+	partition Sales = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("bike-shop-db", "shop"),
+				    Data = Source{[Schema="dbo",Item="v_sales"]}[Data]
+				in
+				    Data

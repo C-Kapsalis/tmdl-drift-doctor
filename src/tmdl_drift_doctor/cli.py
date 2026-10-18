@@ -121,10 +121,13 @@ def capture(fleet_path) -> None:
               help="Only this derived model.")
 @click.option("--kind", "kind_filter", default=None,
               help="Only findings whose kind starts with this prefix.")
+@click.option("--csv", "as_csv", is_flag=True,
+              help="One CSV row per model: shape and drift by bucket.")
 @click.option("--allow-stale", is_flag=True,
               help="Proceed even if the template changed since the last "
                    "capture (misclassification risk — see the docs).")
-def detect(fleet_path, as_json, model_filter, kind_filter, allow_stale) -> None:
+def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
+           allow_stale) -> None:
     """Detect drift in every derived model. Read-only.
 
     Exit code 1 when actionable findings exist (allowlisted, not advisory,
@@ -132,15 +135,43 @@ def detect(fleet_path, as_json, model_filter, kind_filter, allow_stale) -> None:
     could not be parsed. Wire it straight into CI."""
     fleet = _load(fleet_path)
     baseline = _fresh_baseline(fleet, allow_stale)
+    if (kind_filter or "").rstrip(".") == "retire.stranded_ref" and not any(
+            k == "table" for k, _r in
+            Ledger(fleet.ledger_path).active_retirements()):
+        raise ConfigError(
+            f"the stranded-reference check was requested but the ledger "
+            f"({fleet.ledger_path}) records no retired table; it is empty or "
+            f"unreadable, so the check would pass vacuously")
     errors: list = []
     findings = _detect(fleet, baseline, errors, model_filter=model_filter,
                        kind_filter=kind_filter)
+    from .cascade import CSV_HEADER, in_cascade, summarize
+    names = [model_filter] if model_filter else list(fleet.models)
     if as_json:
         click.echo(json.dumps(build_report(fleet, findings, errors,
                                            model_filter, kind_filter),
                               indent=2, ensure_ascii=False))
+    elif as_csv:
+        import csv
+        import io
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")
+        writer.writerow(CSV_HEADER)
+        for row in summarize(fleet, baseline, findings, names):
+            writer.writerow([row[k] for k in CSV_HEADER])
+        click.echo(buf.getvalue(), nl=False)
     else:
         _print_findings(fleet, findings, errors, model_filter, kind_filter)
+        if not kind_filter:
+            rows = summarize(fleet, baseline, findings, names)
+            click.echo("")
+            for row in rows:
+                ok = in_cascade(row)
+                click.echo(f"[{'OK  ' if ok else 'GAP '}] {row['model']}")
+                if row["missing"]:
+                    click.echo(f"    - missing: {', '.join(row['missing'])}")
+            passing = sum(1 for r in rows if in_cascade(r))
+            click.echo(f"Summary: {passing}/{len(rows)} models in cascade")
     if errors:
         sys.exit(PARSE_ERROR_EXIT)
     if any(is_gating(f, fleet) for f in findings):

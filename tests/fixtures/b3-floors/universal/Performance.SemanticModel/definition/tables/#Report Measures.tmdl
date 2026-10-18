@@ -1,0 +1,46 @@
+table '#Report Measures'
+	lineageTag: b3f10000-0000-4000-8000-000000000030
+
+	measure 'X Axis Label' = SELECTEDVALUE('x-Selector 1'[x-Selector 1])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000020
+
+	measure 'X Axis Order' = MAX('x-Selector 1'[x-Selector 1 Order])
+		formatString: 0
+		lineageTag: b3f10000-0000-4000-8000-000000000021
+
+	measure 'Plot Label' = SELECTEDVALUE('x-Plot Specific 1'[x-Plot Specific 1])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000022
+
+	measure 'Plot Order' = MAX('x-Plot Specific 1'[x-Plot Specific 1 Order])
+		formatString: 0
+		lineageTag: b3f10000-0000-4000-8000-000000000023
+
+	measure 'Plot Field' = SELECTEDVALUE('x-Plot Specific 1'[x-Plot Specific 1 Fields])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000024
+
+	measure 'Y Axis Label' = SELECTEDVALUE('y-Selector 1'[y-Selector 1])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000025
+
+	measure 'Y Axis Category' = SELECTEDVALUE('y-Selector 1'[y-Selector 1 Category])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000026
+
+	measure 'Y Plot Label' = SELECTEDVALUE('y-Plot Specific 1'[y-Plot Specific 1])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000027
+
+	measure 'Discount Field Name' = NAMEOF(Sales[discount])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000028
+
+	measure 'Amount Field Name' = NAMEOF(Sales[amount])
+		formatString: General
+		lineageTag: b3f10000-0000-4000-8000-000000000029
+
+	partition '#Report Measures' = calculated
+		mode: import
+		source = ROW("Column", BLANK())

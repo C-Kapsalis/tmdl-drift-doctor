@@ -1,0 +1,76 @@
+table 'x-Selector 1'
+	lineageTag: c20110da-09f9-4581-9ab3-d28fc86e99ff
+
+	column 'x-Selector 1'
+		lineageTag: a3a6191b-533f-4bfb-947e-fc970b90213d
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'x-Selector 1 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'x-Selector 1 Fields'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Selector 1 Fields'
+		isHidden
+		lineageTag: be6f4c14-29d7-480b-94b5-f5a6f770cd1b
+		summarizeBy: none
+		sourceColumn: [Value2]
+		sortByColumn: 'x-Selector 1 Order'
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Selector 1 Order'
+		isHidden
+		formatString: 0
+		lineageTag: ccd1af01-3b26-49bb-ab9b-ed41c2a3bdcf
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Selector 1 Field Category'
+		lineageTag: c658d86f-9833-4094-95cb-7cbb7697424f
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Selector 1 Selected Field' = ```
+			
+			
+			var field_selected = 'x-Selector 1'[x-Selector 1 Fields]
+			VAR StartPos = SEARCH("[", field_selected, 1) + 1
+			VAR EndPos = SEARCH("]", field_selected, StartPos)
+			
+			 RETURN 
+			 MID(field_selected, StartPos, EndPos - StartPos)
+			
+			
+			```
+		lineageTag: 26ad8998-224c-4df8-976c-f39c5acccb68
+		summarizeBy: none
+		sortByColumn: 'x-Selector 1 Order'
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'x-Selector Main Plot-fc17dcb7-b24b-46b5-b224-02f089151833' = calculated
+		mode: import
+		source =
+				
+				{
+				    ( "Cost", NAMEOF ( [Cost] ), -10, "Performance_x" ),
+				    ( "Paid Impressions #", NAMEOF ( [Paid Impressions #] ), -9, "Performance_x" ),
+				    ( "CPM", NAMEOF ( [CPM] ), -8, "Performance_x" ),
+				    ( "Paid Clicks #", NAMEOF ( [Paid Clicks #] ), -7, "Performance_x" ),
+				    ( "CTR", NAMEOF ( [CTR] ), -5, "Performance_x" )
+				}
+
+	annotation PBI_Id = 1a39af074acb4e17bd700da3589966bb

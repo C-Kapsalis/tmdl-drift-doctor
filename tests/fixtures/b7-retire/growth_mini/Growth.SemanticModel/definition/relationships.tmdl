@@ -1,0 +1,12 @@
+
+relationship 5308195d-e93f-4da5-8a9e-b0086650a65f
+	fromColumn: Ads.date
+	toColumn: __Calendar.Date
+
+relationship 2f29ad66-f189-4566-9ce8-488696c9b201
+	fromColumn: Ads.account_x_id
+	toColumn: _Accounts.account_x_id
+
+relationship 74753ef5-b7a2-4521-9788-c4f379b5a34b
+	fromColumn: 'Cohort Performance'.date
+	toColumn: __Calendar.Date

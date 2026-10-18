@@ -1,0 +1,32 @@
+/// Campaign dimension (fixture table).
+table _Campaigns
+	lineageTag: 6b7c0002-0000-4000-8000-000000000011
+
+	column campaign_x_id
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 6b7c0002-0000-4000-8000-000000000012
+		summarizeBy: none
+		sourceColumn: campaign_x_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Campaign X'
+		dataType: string
+		lineageTag: 6b7c0002-0000-4000-8000-000000000013
+		summarizeBy: none
+		sourceColumn: Campaign X
+
+		annotation SummarizationSetBy = Automatic
+
+	partition _Campaigns-5a4b3c2d = m
+		mode: import
+		queryGroup: Dimensions
+		source =
+				let
+				    Source = source_filter_dates("_campaigns_n", "", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit")
+				in
+				    Source
+
+	annotation PBI_ResultType = Table

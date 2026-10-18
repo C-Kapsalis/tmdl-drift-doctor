@@ -32,6 +32,7 @@ all appliers are idempotent (a second run finds nothing to do).
 from __future__ import annotations
 
 import difflib
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -390,7 +391,46 @@ def _apply_retire_relationship(fleet: Fleet, f: Finding) -> tuple:
             [FileChange(d_file, content, new)])
 
 
+def _apply_casing(fleet: Fleet, f: Finding) -> tuple:
+    """Rewrite both endpoints of a relationship to the template's spelling
+    (a mechanical, meaning-preserving edit)."""
+    derived, _ = _model_paths(fleet, f)
+    d_file = derived / "relationships.tmdl"
+    content = d_file.read_text(encoding="utf-8")
+    sig = f.data["signature"]
+    span = te.relationship_span(content, sig)
+    if span is None:
+        return ("relationship already spelled as in the template", [])
+    baseline_tables = (_current_baseline(fleet).get("tables") or {})
+    tables = {t.casefold(): t for t in baseline_tables}
+    lines = content.split("\n")
+    from .tmdl import _parse_column_ref
+    for i in range(span[0], span[1]):
+        m = re.match(r"^(\t(?:fromColumn|toColumn)\s*:\s*)(.+?)\s*$", lines[i])
+        if not m:
+            continue
+        ref = _parse_column_ref(m.group(2))
+        if not ref:
+            continue
+        table = tables.get(ref[0].casefold())
+        if table is None:
+            continue
+        cols = {c.casefold(): c for c in
+                (baseline_tables[table].get("columns") or {})}
+        col = cols.get(ref[1].casefold(), ref[1])
+        lines[i] = m.group(1) + te.smart_quote(table) + "." + te.smart_quote(col)
+    new = "\n".join(lines)
+    return ("rewrite relationship endpoints to the template's spelling",
+            [FileChange(d_file, content, new)] if new != content else [])
+
+
+def _current_baseline(fleet: Fleet) -> dict:
+    from .baseline import load_baseline
+    return load_baseline(fleet)
+
+
 APPLIERS: dict = {
+    "relationship.casing_mismatch": _apply_casing,
     "table.missing": _apply_table_missing,
     "column.missing": _apply_column,
     "column.property_drift": _apply_column,
@@ -595,7 +635,7 @@ PHASES = (
     "measure.missing",
     "measure.wrong_host", "measure.expression_drift", "measure.property_drift",
     "relationship.missing", "relationship.modified",
-    "retire.relationship", "retire.measure", "retire.mapping_row",
+    "relationship.casing_mismatch", "retire.relationship", "retire.measure", "retire.mapping_row",
     "retire.column", "retire.table",
 )
 

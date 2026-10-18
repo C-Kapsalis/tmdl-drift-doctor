@@ -1,0 +1,83 @@
+table Ads
+	lineageTag: 54f8d3e2-5daa-40d9-8de4-888bfe676948
+
+	column cost
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9b266652-1bfe-4c98-b6a7-68e34eb183db
+		summarizeBy: sum
+		sourceColumn: cost
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column clicks
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 393e1a50-8b08-48b2-a4dc-71be10caa435
+		summarizeBy: sum
+		sourceColumn: clicks
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column impressions
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 28ccf0e9-6748-44ef-808b-ee74f689f635
+		summarizeBy: sum
+		sourceColumn: impressions
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column date
+		dataType: dateTime
+		isHidden
+		formatString: General Date
+		isAvailableInMdx: false
+		lineageTag: b56a1ff8-a6e1-4fc1-9b3a-65195a421f88
+		summarizeBy: none
+		sourceColumn: date
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_x_id
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 62e754ef-3204-4a9d-aa5c-dc90c0bc9d27
+		summarizeBy: sum
+		sourceColumn: account_x_id
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Ads-722fb633-9426-45cf-987d-492ed727879b = m
+		mode: import
+		queryGroup: Marketing
+		source =
+				let
+				    Source = source_filter_dates("ads_n", "date", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit"),
+				    #"Renamed Columns" = Table.RenameColumns(Source,{{"ad_strength", "Ad Strength"}, {"currency", "Currency"}, {"currency_converted", "Currency Converted"}})
+				in
+				    #"Renamed Columns"
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navigation

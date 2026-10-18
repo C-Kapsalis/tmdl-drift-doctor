@@ -1,0 +1,14 @@
+table 'f-Filters'
+	lineageTag: b3f10000-0000-4000-8000-000000000033
+
+	measure 'f-Online' = INT(NOT ISEMPTY(Sales))
+		formatString: 0
+		lineageTag: b3f10000-0000-4000-8000-000000000031
+
+	measure 'f-Stores' = INT(NOT ISEMPTY(_Stores))
+		formatString: 0
+		lineageTag: b3f10000-0000-4000-8000-000000000032
+
+	partition 'f-Filters' = calculated
+		mode: import
+		source = ROW("Column", BLANK())

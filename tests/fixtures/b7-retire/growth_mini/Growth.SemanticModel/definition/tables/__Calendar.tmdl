@@ -1,0 +1,125 @@
+/// Contains the central time dimensions within the data model, enabling trend analysis, comparisons, and evaluations across different intervals for all available measures.
+table __Calendar
+	lineageTag: 0f164dfa-5c2b-4562-bf43-510ce68c97a9
+	dataCategory: Time
+
+	/// The date on a specific day (yyyy-MM-dd).
+	column Date
+		dataType: dateTime
+		isKey
+		formatString: yyyy-mm-dd
+		lineageTag: e8c7a316-bfdc-4003-a8ea-27c5984d3591
+		summarizeBy: none
+		sourceColumn: Date
+
+		changedProperty = FormatString
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isDateTimeCustom":true}
+
+	/// Year number (yyyy).
+	column 'Calendar Year'
+		dataType: int64
+		formatString: 0
+		lineageTag: d68d0cfd-0757-489d-8606-fe1848a901c4
+		summarizeBy: none
+		sourceColumn: Calendar Year
+
+		annotation SummarizationSetBy = User
+
+	/// Date on the first day (Monday) of the week (yyyy-MM-dd).
+	column Week
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: 8e21a86b-c3e3-4abc-99db-f2b3fbea2877
+		summarizeBy: none
+		sourceColumn: Week
+
+		changedProperty = FormatString
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isDateTimeCustom":true}
+
+	/// Date on the first day of the month (yyyy-MM-dd).
+	column Month
+		dataType: dateTime
+		formatString: mmmm yyyy
+		lineageTag: 2dd514fd-9432-4ad9-9331-777dbdba1edc
+		summarizeBy: none
+		sourceColumn: Month
+
+		changedProperty = FormatString
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isDateTimeCustom":true}
+
+	/// First day of the year (yyyy-MM-dd).
+	column Year
+		dataType: dateTime
+		formatString: yyyy
+		lineageTag: 3740a864-81a2-4e6b-989f-6e6f30bf1aa6
+		summarizeBy: none
+		sourceColumn: Year
+
+		changedProperty = FormatString
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isDateTimeCustom":true}
+
+	column 'Quarter Text'
+		dataType: string
+		isHidden
+		lineageTag: ba22368e-58a2-44a8-93f7-011202d9407f
+		summarizeBy: none
+		sourceColumn: Quarter Text
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	/// The basic Calendar Hierarchy used across visuals to report the time dimension.
+	hierarchy 'Calendar Hierarchy'
+		lineageTag: fe7ed101-a54b-4bbd-aa36-016e02ab84ac
+
+		level Year
+			lineageTag: 2b22b22e-f65a-4159-b9bf-e7d53e48ddb0
+			column: Year
+
+		level Quarter
+			lineageTag: 8be5483f-f626-4fb9-b8aa-aa58c3b485cc
+			column: 'Quarter Text'
+
+		level Month
+			lineageTag: 029f9e21-cc71-41bd-b218-7f80c86b662f
+			column: Month
+
+		level Week
+			lineageTag: ef329b6c-b9b6-4719-ae6e-8bf4d8f9fc7a
+			column: Week
+
+		level Date
+			lineageTag: d114b600-c235-4e1e-aaa7-6406d12782af
+			column: Date
+
+	partition __Calendar-9e3f3eb8-1bda-42ea-a526-5d40795c6716 = m
+		mode: import
+		queryGroup: Calendars
+		source =
+				let
+				    Source = source_filter_dates("__calendar_n", "", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit"),
+				    #"Renamed Columns" = Table.RenameColumns(Source,{{"calendar_date", "Calendar Date"}, {"calendar_day_name", "Calendar Day Name"}, {"calendar_day_week", "Calendar Day Week"}, {"calendar_day_month", "Calendar Day Month"}, {"calendar_week", "Calendar Week"}, {"calendar_month", "Calendar Month"}, {"calendar_month_name", "Calendar Month Name"}, {"calendar_year", "Calendar Year"}, {"calendar_quarter", "Calendar Quarter"}, {"calendar_date_monday_week", "Calendar Date Monday Week"}, {"calendar_date_start_month", "Calendar Date Start Month"}, {"calendar_date_start_year", "Calendar Date Start Year"}, {"calendar_is_weekend", "Calendar Is Weekend"}}),
+				    #"Added Custom" = Table.AddColumn(#"Renamed Columns", "Calendar Date Start Quarter", each Date.StartOfQuarter([Calendar Date])),
+				    #"Changed Type" = Table.TransformColumnTypes(#"Added Custom",{{"Calendar Date Start Quarter", type date}}),
+				    #"Added Custom1" = Table.AddColumn(#"Changed Type", "Calendar Quarter Date", each Text.From(Date.Year([Calendar Date])) & "-" & Text.From(Date.QuarterOfYear([Calendar Date]))),
+				    #"Changed Type1" = Table.TransformColumnTypes(#"Added Custom1",{{"Calendar Quarter Date", type text}}),
+				    #"Renamed Columns1" = Table.RenameColumns(#"Changed Type1",{{"Calendar Date Monday Week", "Week"}, {"Calendar Date Start Month", "Month"}, {"Calendar Date Start Year", "Year"}, {"Calendar Date", "Date"}, {"Calendar Quarter Date", "Quarter Text"}, {"Calendar Date Start Quarter", "Quarter"}})
+				in
+				    #"Renamed Columns1"
+
+	annotation PBI_ResultType = Exception
+
+	annotation PBI_NavigationStepName = Navigation

@@ -1,0 +1,28 @@
+/// US Format [mm/dd/yyyy]
+expression v-fromdate = #date(2025, 1, 1) meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Date"]
+	lineageTag: 681552a2-8a70-4ae1-801e-27d7949b1981
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Date
+
+	annotation PBI_NavigationStepName = Navigation
+
+expression v-daysAgo = 90 meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Number"]
+	lineageTag: 96d8d35f-641d-4be2-b87c-fb48302d11d5
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Number
+
+expression v-isRolling = 0 meta [IsParameterQuery = true, IsParameterQueryRequired = true, Type = "Number"]
+	lineageTag: 216a1ba3-4059-4b6e-9c17-873bf36ee9b7
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Number
+
+expression v-rows_limit = " " meta [IsParameterQuery=true, List={" ", "LIMIT 1", "LIMIT 100", "LIMIT 1000", "LIMIT 10000"}, DefaultValue=" ", Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 9baff864-dd63-4354-9c39-2f9d4bdbf8e2
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Text
+
+	annotation PBI_NavigationStepName = Navigation

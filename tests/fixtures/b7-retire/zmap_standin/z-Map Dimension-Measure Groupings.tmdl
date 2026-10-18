@@ -1,0 +1,20 @@
+table 'z-Map Dimension-Measure Groupings'
+	lineageTag: 00000000-aaaa-bbbb-cccc-000000000001
+
+	column 'Analysis Category'
+		dataType: string
+		lineageTag: 00000000-aaaa-bbbb-cccc-000000000002
+		summarizeBy: none
+		sourceColumn: Analysis Category
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'z-Map Dimension-Measure Groupings' = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("fY2xCoAwEEN/RTr7G86CDg6llKJBS6VX7qr4+Vqxq5DhkjwuWqux61WrHgnICkQ8RbGXMm3tBheDj6t8DD+29pkYzeh2yPejBJZxIh74h4gXcB2aiINslMoakvNcUH4vm/0ckF/S3A==", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [#"Analysis Category" = _t, #"Analysis Subcategory" = _t, category_x_id = _t])
+				in
+				    Source
+
+	annotation PBI_Id = 00000000000000000000000000000001

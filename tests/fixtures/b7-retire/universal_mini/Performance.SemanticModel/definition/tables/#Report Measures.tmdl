@@ -1,0 +1,78 @@
+table '#Report Measures'
+	lineageTag: 616c9cc7-ef39-4d8c-8c0f-1e311e8fe5fa
+
+	measure Cost = SUM(Ads[cost])
+		formatString: #,0.00\ "€";-#,0.00\ "€";#,0.00\ "€"
+		displayFolder: Ads
+		lineageTag: e733c8d3-6cb6-4008-8627-68bfeb42d249
+
+	measure 'Paid Clicks #' = SUM(Ads[clicks])
+		formatString: #,0
+		displayFolder: Ads
+		lineageTag: 5bad1d59-163d-464c-ae20-fe27160a6e29
+
+	measure 'Paid Impressions #' = SUM(Ads[impressions])
+		formatString: #,0
+		displayFolder: Ads
+		lineageTag: 538b89fa-e3aa-41fe-a009-c6635acdbae4
+
+	/// Click-through rate (CTR) from paid campaigns across integrated ad platforms. Calculated by dividing total clicks by total impressions.
+	measure CTR = DIVIDE([Paid Clicks #],[Paid Impressions #])
+		formatString: 0.0%;-0.0%;0.0%
+		displayFolder: Ads
+		lineageTag: 2b922f19-2b77-49e2-bf48-5a1dd8d3f01f
+
+		changedProperty = FormatString
+
+	/// Cost per thousand impressions (CPM) from paid campaigns across integrated ad platforms. Calculated by dividing total cost by impressions in thousands.
+	measure CPM =
+			
+			DIVIDE (
+			    CALCULATE (
+			        [Cost],
+			        KEEPFILTERS ( _Accounts[Account Service] <> "manual_expenses" )
+			    ),
+			    DIVIDE ( [Paid Impressions #], 1000 )
+			)
+		formatString: #,0.00\ "€";-#,0.00\ "€";#,0.00\ "€"
+		displayFolder: Ads
+		lineageTag: 74376a7e-3378-473e-a740-b61702c5be0f
+
+		changedProperty = FormatString
+
+		annotation PBI_FormatHint = {"isDecimal":true}
+
+	column z_space
+		dataType: string
+		isHidden
+		lineageTag: 662c2ca5-ddc4-4a13-8375-42194175d0e0
+		summarizeBy: none
+		sourceColumn: z_space
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column z
+		dataType: string
+		isHidden
+		lineageTag: 9ed61f4f-f586-4abc-8e5c-19984d6b8d45
+		summarizeBy: none
+		sourceColumn: z
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	partition '#Report Measures-14fd91da-2425-43c5-8238-e620504b2e61' = m
+		mode: import
+		queryGroup: Measures
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("i45WUlDSUTq0XSk2FgA=", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [z = _t, z_space = _t])
+				in
+				    Source
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navigation

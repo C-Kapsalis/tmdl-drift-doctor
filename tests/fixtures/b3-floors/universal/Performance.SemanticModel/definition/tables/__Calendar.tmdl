@@ -1,0 +1,12 @@
+table __Calendar
+	lineageTag: b3f10000-0000-4000-8000-000000000008
+
+	column Date
+		dataType: dateTime
+		lineageTag: b3f10000-0000-4000-8000-000000000007
+		summarizeBy: none
+		sourceColumn: Date
+
+	partition __Calendar = calculated
+		mode: import
+		source = CALENDARAUTO()

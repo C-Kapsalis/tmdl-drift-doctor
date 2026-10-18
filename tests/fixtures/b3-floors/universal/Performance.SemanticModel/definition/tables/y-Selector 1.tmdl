@@ -1,0 +1,39 @@
+table 'y-Selector 1'
+	lineageTag: b3f10000-0000-4000-8000-000000000052
+
+	column 'y-Selector 1'
+		dataType: string
+		lineageTag: b3f10000-0000-4000-8000-000000000047
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'y-Selector 1 Order'
+
+	column 'y-Selector 1 Fields'
+		dataType: string
+		isHidden
+		lineageTag: b3f10000-0000-4000-8000-000000000048
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+	column 'y-Selector 1 Order'
+		dataType: int64
+		isHidden
+		lineageTag: b3f10000-0000-4000-8000-000000000049
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	column 'y-Selector 1 Category'
+		dataType: string
+		lineageTag: b3f10000-0000-4000-8000-000000000050
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+	partition 'y-Selector 1' = calculated
+		mode: import
+		source =
+				{
+				    ("Revenue", NAMEOF('Sales'[amount]), 0, "Sales"),
+				    ("Orders", NAMEOF('Sales'[order_id]), 1, "Sales")
+				}
+
+	annotation PBI_Id = b3f10000000040008000000000000051
