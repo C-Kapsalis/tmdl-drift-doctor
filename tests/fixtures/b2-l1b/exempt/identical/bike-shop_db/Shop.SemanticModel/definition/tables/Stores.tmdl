@@ -1,0 +1,26 @@
+table Stores
+	lineageTag: 7a1e0000-0000-4000-8000-000000000028
+
+	column store_id
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000029
+		summarizeBy: none
+		sourceColumn: store_id
+
+	column city
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000030
+		summarizeBy: none
+		sourceColumn: city
+
+	measure 'Store Count' = COUNTROWS(Stores)
+		lineageTag: 7a1e0000-0000-4000-8000-000000000031
+
+	partition Stores = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

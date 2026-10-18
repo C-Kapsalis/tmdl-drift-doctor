@@ -1,0 +1,5 @@
+version: '2.0'
+client: 'shopify'
+description: 'Data quality overlay for shopify (fictional)'
+quality_thresholds:
+  null_rate_max: 0.05

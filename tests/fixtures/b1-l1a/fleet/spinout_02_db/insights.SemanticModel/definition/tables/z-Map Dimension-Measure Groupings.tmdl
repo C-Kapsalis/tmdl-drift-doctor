@@ -1,0 +1,16 @@
+table 'z-Map Dimension-Measure Groupings'
+	lineageTag: bbde0447-b3b5-5412-b660-69ed053475af
+
+	column 'Analysis Category'
+		dataType: string
+		lineageTag: 19446053-e865-5c1b-ae9f-4cbc7d829e57
+		summarizeBy: none
+		sourceColumn: Analysis Category
+
+	partition 'z-Map Dimension-Measure Groupings' = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("lY09DsIwDIWvUmXuVRAVGRiqqnIdo0SEOooD56+TiK0MbPb73s88G5tod2Y0EwQ3XMgF0Oe1SpOX8acBE3ZMIoF3UfFOW89+pcqv2VGu1HpODXNXziHwp5G2Zgky+pPtGPDZG24MUoYp8yNEqk16ujcW3W/WXPm6QUFP/yQii9qXAw==", BinaryEncoding.Base64), Compression.Deflate)))
+				in
+				    Source

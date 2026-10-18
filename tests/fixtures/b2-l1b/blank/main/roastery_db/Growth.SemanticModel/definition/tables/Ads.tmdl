@@ -1,0 +1,29 @@
+table Ads
+	lineageTag: 7a1e0000-0000-4000-8000-000000000198
+
+	column channel
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000199
+		summarizeBy: none
+		sourceColumn: channel
+
+	column campaign
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000200
+		summarizeBy: none
+		sourceColumn: campaign
+
+	column clicks
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000201
+		summarizeBy: none
+		sourceColumn: clicks
+
+	partition Ads = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

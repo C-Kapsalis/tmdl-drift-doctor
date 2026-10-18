@@ -1,0 +1,46 @@
+# b1-l1a stand-in fleet: a fictional coffee roastery. Template = universal/Performance;
+# one entry per original registry client (ids renamed by gates/rename.py).
+version: 1
+template: universal/Performance.SemanticModel
+models:
+  spinout-02:
+    path: spinout_02_db/insights.SemanticModel
+    secondary_models:
+      - name: spinout-02-performance
+        path: spinout_02_db/Performance.SemanticModel
+        deviations: []
+    overrides:
+      - object: v-fromdate
+        kind: expression
+        reason: the outlet model keeps its own 2020 data floor
+        owner: data-team
+        added: 2026-01-15
+  spinout-03: spinout_03_db/Performance.SemanticModel
+  spinout-05: spinout_05_db/Performance.SemanticModel
+  spinout-07: spinout_07_db/Performance.SemanticModel
+  spinout-08: spinout_08_db/Performance.SemanticModel
+  spinout-10: spinout_10_db/Growth.SemanticModel
+  spinout-11: spinout_11_db/Performance.SemanticModel
+  spinout-13: spinout_13_db/Performance.SemanticModel
+  shopify: shopify_db/Performance.SemanticModel
+mapping_tables:
+  - z-Map Dimension-Measure Groupings
+category_annotations:
+  baseline: category_annotation_baseline.json
+overlays:
+  dir: overlays
+connection_parameters:
+  - v-db
+  - v-BQ_project
+state_dir: .drift-doctor
+allowlist:
+  kinds:
+    - expression.drift
+    - expression.missing
+    - category_annotation.undeclared
+  expressions:
+    - v-fromdate
+    - v-fromdate seo
+    - v-fromdate speed
+    - v-fromdate ga4
+    - v-fromdate email

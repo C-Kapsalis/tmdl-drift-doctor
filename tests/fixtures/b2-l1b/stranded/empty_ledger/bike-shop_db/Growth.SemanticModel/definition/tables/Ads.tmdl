@@ -1,0 +1,26 @@
+table Ads
+	lineageTag: 7a1e0000-0000-4000-8000-000000000164
+
+	column ad_id
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000165
+		summarizeBy: none
+		sourceColumn: ad_id
+
+	column clicks
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000166
+		summarizeBy: none
+		sourceColumn: clicks
+
+	measure Clicks = SUM(Ads[clicks])
+		lineageTag: 7a1e0000-0000-4000-8000-000000000167
+
+	partition Ads = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

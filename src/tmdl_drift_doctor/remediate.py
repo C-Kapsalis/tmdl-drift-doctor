@@ -45,7 +45,7 @@ from .detect import (
     dependents,
     split_ref,
 )
-from .fleet import Fleet
+from .fleet import Fleet, kind_matches
 from .ledger import Ledger
 from .tmdl import Model, dax_references, parse_model, parse_signature
 
@@ -620,7 +620,7 @@ def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
     result = RunResult()
 
     for f in sorted(findings, key=_phase):
-        if kind and not f.kind.startswith(kind):
+        if kind and not kind_matches(f.kind, kind):
             continue
         if f.overridden:
             o = f.override
@@ -642,7 +642,7 @@ def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
                 f"kind '{f.kind}' has no automated fix — resolve it by "
                 f"editing the model directly"))
             continue
-        if f.kind not in fleet.allowlist_kinds:
+        if not fleet.allows(f.kind):
             result.outcomes.append(Outcome(
                 f, "skipped",
                 f"kind '{f.kind}' is not in the fleet allowlist — nothing "
@@ -676,6 +676,13 @@ def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
             except _Skip as skip:
                 result.outcomes.append(Outcome(f, "skipped", str(skip)))
                 continue
+            exempt = _exempt_change(fleet, f, changes)
+            if exempt is not None:
+                result.outcomes.append(Outcome(
+                    f, "overridden",
+                    f"{exempt.path} is exempt from the template cascade "
+                    f"(overrides.files): {exempt.reason}"))
+                continue
             for c in changes:
                 if c.new is not None and c.path.suffix == ".tmdl":
                     te.assert_tmdl_valid(c.new)   # guard BEFORE any write
@@ -699,6 +706,28 @@ def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
             result.outcomes.append(Outcome(f, "failed", str(e)))
 
     return result
+
+
+@dataclass
+class _Exempt:
+    path: str
+    reason: str
+
+
+def _exempt_change(fleet: Fleet, f: Finding, changes: list):
+    """The first change touching a file the model declared exempt."""
+    if f.model not in fleet.models or not fleet.exempt_patterns(f.model):
+        return None
+    root = fleet.model_root(f.model)
+    for c in changes:
+        try:
+            rel = Path(c.path).resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        hit = fleet.file_override(f.model, rel)
+        if hit is not None:
+            return _Exempt(rel, hit.reason)
+    return None
 
 
 MAX_PASSES = 4

@@ -1,0 +1,9 @@
+{
+  "orphaned": {
+    "spinout_02_db/insights.SemanticModel": [
+      "Competition",
+      "Email Marketing"
+    ]
+  },
+  "undeclared": {}
+}

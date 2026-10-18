@@ -1,0 +1,39 @@
+expression v-db = "roastery_dw" meta [IsParameterQuery = true, IsParameterQueryRequired = true, Type = "Text"]
+	lineageTag: 5121e2c2-c383-5416-842c-3aab83f3522b
+
+	annotation PBI_ResultType = Text
+
+expression v-BQ_project = "roastery-warehouse" meta [IsParameterQuery = true, IsParameterQueryRequired = true, Type = "Text"]
+	lineageTag: 0def4a72-7df7-5dc8-866f-17624678d0c9
+
+	annotation PBI_ResultType = Text
+
+expression v-fromdate = #date(2024, 1, 1) meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Date"]
+	lineageTag: 53174fe1-787f-5870-bfa4-0225b82dab88
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Date
+
+expression 'v-fromdate seo' = #date(2024, 3, 1) meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Date"]
+	lineageTag: 5382e19e-0394-5492-af7f-642b29e4dd9a
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Date
+
+expression 'v-fromdate speed' = #date(2024, 6, 1) meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Date"]
+	lineageTag: 95ea1ee4-f214-57fb-9c8b-18f9e478f195
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Date
+
+expression 'v-fromdate ga4' = #date(2023, 7, 1) meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Date"]
+	lineageTag: 853e7327-5ba2-558e-903e-d8e08c5957c7
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Date
+
+expression 'v-fromdate email' = #date(2024, 2, 1) meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Date"]
+	lineageTag: 5a05e220-2297-5832-92fc-acd12db1ef54
+	queryGroup: 'v-Variables\Time Limit Variables'
+
+	annotation PBI_ResultType = Date

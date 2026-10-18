@@ -1,0 +1,19 @@
+table 'z-Selector Format'
+	lineageTag: 15dfdecb-2d85-565a-bffb-6f21b77ed9e3
+
+	calculationGroup
+
+		calculationItem 'Dynamic Format' = SELECTEDMEASURE()
+
+			formatStringDefinition =
+					SWITCH(
+					    TRUE(),
+					    ISINSCOPE('Orders'[OrderId]), "0",
+					    SELECTEDMEASUREFORMATSTRING()
+					)
+
+	column Name
+		dataType: string
+		lineageTag: 82fa7728-c582-57ca-a757-157a1d5c4007
+		summarizeBy: none
+		sourceColumn: Name

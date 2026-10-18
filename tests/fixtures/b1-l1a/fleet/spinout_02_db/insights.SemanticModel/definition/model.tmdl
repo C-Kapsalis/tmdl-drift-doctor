@@ -1,0 +1,13 @@
+model Model
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+
+annotation Category_Roast_Profiles = "Roast batches, roast loss and profile yields"
+
+annotation Category_Competition = "Competitor price index"
+
+annotation Category_Email_Marketing = "Newsletter sends and opens"
+
+ref table Orders
+ref table 'z-Selector Format'
+ref table 'z-Map Dimension-Measure Groupings'

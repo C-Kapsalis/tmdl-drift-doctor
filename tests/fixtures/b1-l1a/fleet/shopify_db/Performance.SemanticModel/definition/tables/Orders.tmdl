@@ -1,0 +1,20 @@
+table Orders
+	lineageTag: ae3ed584-2893-589b-9e92-14c48047c827
+
+	measure 'Total Orders' = COUNTROWS(Orders)
+		formatString: 0
+		lineageTag: 740342e9-0c8d-5bba-b6f3-0b7623971372
+
+	column OrderId
+		dataType: int64
+		lineageTag: aa3efb47-1a28-5d82-9f45-fbeb0121b470
+		summarizeBy: none
+		sourceColumn: OrderId
+
+	partition Orders = m
+		mode: import
+		source =
+				let
+				    Source = #table({"OrderId"}, {{1}})
+				in
+				    Source

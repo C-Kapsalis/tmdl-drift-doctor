@@ -1,0 +1,13 @@
+{
+  "template": "universal/Shop.SemanticModel",
+  "models": {
+    "bike-shop": {
+      "path": "bike-shop_db/Shop.SemanticModel",
+      "files": [
+        "Shop.SemanticModel/definition/tables/Store Orders.tmdl",
+        "NOTES.md",
+        ""
+      ]
+    }
+  }
+}

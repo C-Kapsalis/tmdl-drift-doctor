@@ -1,0 +1,7 @@
+version: '2.0'
+client: 'spinout-05'
+description: 'Policy overlay for spinout-05 (fictional roastery stand-in)'
+performance:
+  max_query_seconds: 30
+validation:
+  strict: true

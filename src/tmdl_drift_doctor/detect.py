@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import DriftDoctorError
-from .fleet import Fleet, Override
+from .fleet import Fleet, Override, kind_matches
 from .ledger import Ledger
 from .tmdl import (
     Model,
@@ -117,7 +117,7 @@ def is_actionable(f: Finding, fleet: Fleet) -> bool:
     """THE predicate shared by detect's exit code, the ratchet and review:
     a finding is actionable when its kind is allowlisted, it is not
     advisory, and no override acknowledges it."""
-    return (f.kind in fleet.allowlist_kinds and not f.advisory
+    return (fleet.allows(f.kind) and not f.advisory
             and not f.overridden)
 
 
@@ -574,10 +574,40 @@ def _duplicate_host(model: str, host: str, extra: str, mname: str) -> Finding:
         data={"template_host": host, "measure": mname})
 
 
+def finding_files(fleet: Fleet, f: Finding) -> list:
+    """The files (relative to the model root) a finding's fix would write,
+    as far as the kind tells: the table file for table-scoped kinds,
+    relationships.tmdl and expressions.tmdl for theirs."""
+    defn = f"{fleet.models[f.model].name}/definition"
+    head = f.kind.split(".", 1)[0]
+    if head in ("relationship",) or f.kind == "retire.relationship":
+        return [f"{defn}/relationships.tmdl"]
+    if head == "expression":
+        return [f"{defn}/expressions.tmdl"]
+    table = f.data.get("table") if isinstance(f.data, dict) else None
+    if not table:
+        ref = f.ref
+        if "->" in ref:
+            return [f"{defn}/relationships.tmdl"]
+        table = ref[:ref.rindex("[")] if ref.endswith("]") and "[" in ref \
+            else ref.split("/", 1)[0]
+    out = [f"{defn}/tables/{table}.tmdl"]
+    if f.kind == "measure.wrong_host":
+        out.append(f"{defn}/tables/{f.data.get('from_table')}.tmdl")
+    return out
+
+
 def apply_overrides(fleet: Fleet, findings: list) -> list:
     from .overrides import match_override
     for f in findings:
         f.override = match_override(fleet, f)
+        if f.override is None and f.model in fleet.models \
+                and fleet.exempt_patterns(f.model):
+            for rel in finding_files(fleet, f):
+                hit = fleet.file_override(f.model, rel)
+                if hit is not None:
+                    f.override = hit
+                    break
     return findings
 
 
@@ -606,7 +636,7 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
                 raise
             errors.append({"model": name, "error": str(e)})
     if kind_filter:
-        findings = [f for f in findings if f.kind.startswith(kind_filter)]
+        findings = [f for f in findings if kind_matches(f.kind, kind_filter)]
     return apply_overrides(fleet, findings)
 
 
@@ -634,7 +664,7 @@ def model_counts(fleet: Fleet, items: list) -> dict:
         "overridden": sum(1 for f in items if f.overridden),
         "not_allowlisted": sum(1 for f in items if not f.advisory
                                and not f.overridden
-                               and f.kind not in fleet.allowlist_kinds),
+                               and not fleet.allows(f.kind)),
         "by_kind": dict(sorted(by_kind.items())),
     }
 

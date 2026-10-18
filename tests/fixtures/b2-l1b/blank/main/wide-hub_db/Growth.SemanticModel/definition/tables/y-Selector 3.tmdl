@@ -1,0 +1,41 @@
+table 'y-Selector 3'
+	lineageTag: 7a1e0000-0000-4000-8000-000000000218
+
+	column 'y-Selector 3'
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000219
+		summarizeBy: none
+		sourceColumn: [Value1]
+
+	column 'y-Selector 3 Fields'
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000220
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+	column 'y-Selector 3 Order'
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000221
+		summarizeBy: none
+		sourceColumn: [Value3]
+
+	column 'y-Selector 3 Field Category'
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000222
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+	column 'y-Selector 3 Kind'
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000223
+		summarizeBy: none
+		sourceColumn: [Value5]
+
+	partition 'y-Selector 3' = calculated
+		mode: import
+		source =
+				{
+				    ("Channel", NAMEOF('Ads'[channel]), 0, "Channel_y", "x", "extra"),
+				    ("Campaign", NAMEOF('Ads'[campaign]), 1, "Campaign_y", "x", "extra")
+				}
+

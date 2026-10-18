@@ -9,6 +9,7 @@ that matches nothing: a typo must never silently disable a gate.
 An overridden finding is never remediated and never fails ``detect`` or the
 ratchet, but it is never silent either: every run prints it as an ACK with
 its reason, owner and date, and ``review`` lists it for periodic re-review.
+Declarations made on a fleet entry cover the entry's secondary models too.
 """
 
 from __future__ import annotations
@@ -24,17 +25,25 @@ from .tmdl import parse_signature
 SUPPRESSES = {
     "expression": ("measure.expression_drift", "measure.property_drift",
                    "column.property_drift", "expression.drift",
-                   "relationship.modified"),
+                   "relationship.modified", "measure.wrong_host"),
     "absent": ("table.missing", "column.missing", "measure.missing",
                "mapping_row.missing", "relationship.missing",
-               "expression.drift"),
+               "expression.missing", "expression.drift"),
     "retain": ("retire.table", "retire.column", "retire.measure",
-               "retire.mapping_row", "retire.relationship"),
+               "retire.mapping_row", "retire.relationship",
+               "purge.table", "purge.relationship"),
+    "extension": ("extra.column", "extra.measure", "purge.column",
+                  "purge.measure"),
 }
 
 
+def _bare(ref: str) -> str:
+    return ref[ref.rindex("[") + 1:-1] if ref.endswith("]") and "[" in ref \
+        else ref
+
+
 def _template_refs(baseline: dict) -> dict:
-    """{kind_family: set(refs)} of everything the template defines."""
+    """{family: set(refs)} of everything the template defines."""
     tables = baseline.get("tables") or {}
     return {
         "table": set(tables),
@@ -50,38 +59,67 @@ def _template_refs(baseline: dict) -> dict:
     }
 
 
+def _problem(o: Override, refs: dict, retired: set) -> Optional[str]:
+    obj = o.object
+    if "->" in obj:
+        try:
+            parse_signature(obj)
+        except DriftDoctorError as e:
+            return str(e)
+    bare_measures = {_bare(r) for r in refs["measure"]}
+    if o.section == "columns":
+        if o.kind == "absent" and obj not in refs["column"]:
+            return (f"override `{obj}` (columns, kind absent) does not exist "
+                    f"in the template (check the Table[column] spelling)")
+        return None
+    if o.section == "measures":
+        if o.kind == "expression" and obj not in refs["measure"]:
+            return (f"override `{obj}` (measures, kind expression) does not "
+                    f"resolve in the template")
+        if o.kind == "absent" and obj not in refs["measure"] \
+                and obj not in bare_measures:
+            return (f"override `{obj}` (measures, kind absent) does not "
+                    f"resolve in the template")
+        return None
+    if o.section == "expressions":
+        if obj not in refs["expression"]:
+            return (f"override `{obj}` (expressions) does not resolve in the "
+                    f"template")
+        return None
+    if o.section in ("tables", "relationships"):
+        return None          # retention of derived or retired objects
+    shared = (refs["measure"] | refs["column"] | refs["relationship"]
+              | refs["expression"])
+    if o.kind == "expression" and obj not in shared:
+        return (f"override `{obj}` (kind expression) does not resolve in the "
+                f"template: it names no template measure, column, "
+                f"relationship or shared expression")
+    if o.kind == "absent" and obj not in set().union(*refs.values()) \
+            and obj not in bare_measures:
+        return (f"override `{obj}` (kind absent) does not resolve in the "
+                f"template: it names nothing the template defines")
+    if o.kind == "retain" and obj not in retired:
+        return (f"override `{obj}` (kind retain) names nothing the ledger "
+                f"records as retired")
+    return None
+
+
 def resolve_overrides(fleet: Fleet, baseline: dict, ledger: Ledger) -> None:
     """Raise DriftDoctorError listing every override whose ``object`` does
     not resolve: ``expression``/``absent`` against the template baseline,
     ``retain`` against the ledger's retirement history."""
     refs = _template_refs(baseline)
-    template_any = set().union(*refs.values())
-    shared = (refs["measure"] | refs["column"] | refs["relationship"]
-              | refs["expression"])
-    ever_retired = {e.get("ref") for e in ledger.entries()
-                    if e.get("event") == "retired"}
+    retired = {e.get("ref") for e in ledger.entries()
+               if e.get("event") == "retired"}
     errors = []
     for model, entries in fleet.overrides.items():
+        owner = fleet.entry_of.get(model, model)
         for o in entries:
-            if "->" in o.object:
-                try:
-                    parse_signature(o.object)
-                except DriftDoctorError as e:
-                    errors.append(f"models.{model}: {e}")
-                    continue
-            if o.kind == "expression" and o.object not in shared:
-                errors.append(
-                    f"models.{model}: override `{o.object}` (kind expression) "
-                    f"names no template measure, column, relationship or "
-                    f"shared expression")
-            elif o.kind == "absent" and o.object not in template_any:
-                errors.append(
-                    f"models.{model}: override `{o.object}` (kind absent) "
-                    f"names nothing the template defines")
-            elif o.kind == "retain" and o.object not in ever_retired:
-                errors.append(
-                    f"models.{model}: override `{o.object}` (kind retain) "
-                    f"names nothing the ledger records as retired")
+            msg = _problem(o, refs, retired)
+            if msg:
+                line = f"models.{owner}: {msg}"
+                if line not in errors:
+                    errors.append(line)
     if errors:
         raise DriftDoctorError(
             "fleet.yml overrides do not resolve (a typo must never silently "
@@ -91,9 +129,14 @@ def resolve_overrides(fleet: Fleet, baseline: dict, ledger: Ledger) -> None:
 def match_override(fleet: Fleet, finding) -> Optional[Override]:
     """The override that acknowledges `finding`, or None."""
     for o in fleet.overrides.get(finding.model) or ():
-        if finding.kind not in SUPPRESSES[o.kind]:
+        if finding.kind not in SUPPRESSES.get(o.kind, ()):
             continue
         if o.object == finding.ref:
+            return o
+        # a bare measure name declared absent covers it on any table
+        if (o.kind == "absent" and "[" not in o.object
+                and finding.kind == "measure.missing"
+                and _bare(finding.ref) == o.object):
             return o
         # a table declared absent also covers the relationships into it
         if (o.kind == "absent" and finding.kind == "relationship.missing"
@@ -104,8 +147,57 @@ def match_override(fleet: Fleet, finding) -> Optional[Override]:
     return None
 
 
+def resolve_for_model(fleet: Fleet, model: str) -> dict:
+    """Every declaration in force for one model, by section. A model with
+    no declarations gets empty sets and maps, never a KeyError."""
+    out = {"expression": {}, "absent": {}, "retain": {}, "extension": {},
+           "columns_absent": {}, "columns": {}, "source_views": {},
+           "tables": set(), "relationships": set(),
+           "fieldparam_entries": {}, "mapping_rows": {}, "files": []}
+    for o in fleet.overrides.get(model) or ():
+        if o.section == "columns":
+            table, col = o.object[:o.object.rindex("[")], _bare(o.object)
+            if o.kind == "absent":
+                out["columns_absent"].setdefault(table, {})[col] = o.meta()
+            else:
+                out["columns"].setdefault(table, set()).add(col)
+            continue
+        if o.section == "tables":
+            out["tables"].add(o.object)
+            continue
+        if o.section == "relationships":
+            out["relationships"].add(o.object)
+            continue
+        out.setdefault(o.kind, {})[o.object] = o.meta()
+    declared = fleet.sections.get(model) or {}
+    views = out["source_views"]
+    views.update((d["table"], d["view"])
+                 for d in declared.get("source_views", ()))
+    for name, (group, item) in _GROUPED.items():
+        bucket = out[name]
+        for d in declared.get(name, ()):
+            bucket.setdefault(d[group], set()).add(d[item])
+    out["files"] = [d.get("path") for d in declared.get("files", ())]
+    return out
+
+
+# grouped retention sections: section -> (group key, member key)
+_GROUPED = {"fieldparam_entries": ("category", "entry"),
+            "mapping_rows": ("category", "key")}
+
+
+def override_measure_names(resolved: dict) -> set:
+    """Bare measure names any override of `resolved` mentions (the set the
+    rename and host-move logic must never "correct")."""
+    names = set()
+    for kind in ("expression", "absent"):
+        for ref in resolved.get(kind) or {}:
+            names.add(_bare(ref))
+    return names
+
+
 def format_ack(finding, o: Override) -> str:
     who = o.owner or "?"
     when = o.added or "?"
-    return (f"  ACK {finding.kind:<26} {finding.ref}  [owner {who}, "
+    return (f"  ACK {finding.kind:<26} {finding.ref}  [{o.kind}; owner {who}, "
             f"added {when}]\n      reason: {o.reason}")

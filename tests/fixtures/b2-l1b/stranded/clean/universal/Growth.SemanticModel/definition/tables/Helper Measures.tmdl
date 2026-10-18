@@ -1,0 +1,14 @@
+table 'Helper Measures'
+	lineageTag: 7a1e0000-0000-4000-8000-000000000108
+
+	measure 'Has Ads' = int(not ISEMPTY('Ads'))
+		lineageTag: 7a1e0000-0000-4000-8000-000000000109
+
+	partition 'Helper Measures' = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

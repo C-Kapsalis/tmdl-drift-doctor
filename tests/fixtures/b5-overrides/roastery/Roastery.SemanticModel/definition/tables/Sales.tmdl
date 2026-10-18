@@ -1,0 +1,58 @@
+table Sales
+	lineageTag: 5a1e0002-0000-4000-8000-000000000001
+
+	measure Revenue = SUM(Sales[Amount])
+		formatString: #,0.00
+		lineageTag: 5a1e0002-0000-4000-8000-000000000002
+
+	measure 'Cups Sold' = SUM(Sales[Cups])
+		formatString: #,0
+		lineageTag: 5a1e0002-0000-4000-8000-000000000003
+
+	measure 'Average Ticket' = DIVIDE([Revenue], DISTINCTCOUNT(Sales[OrderId]))
+		formatString: #,0.00
+		lineageTag: 5a1e0002-0000-4000-8000-000000000004
+
+	column OrderId
+		dataType: int64
+		lineageTag: 5a1e0002-0000-4000-8000-000000000005
+		summarizeBy: none
+		sourceColumn: OrderId
+
+		annotation SummarizationSetBy = Automatic
+
+	column OrderDate
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: 5a1e0002-0000-4000-8000-000000000006
+		summarizeBy: none
+		sourceColumn: OrderDate
+
+		annotation SummarizationSetBy = Automatic
+
+	column Amount
+		dataType: decimal
+		lineageTag: 5a1e0002-0000-4000-8000-000000000007
+		summarizeBy: sum
+		sourceColumn: Amount
+
+		annotation SummarizationSetBy = Automatic
+
+	column Cups
+		dataType: int64
+		lineageTag: 5a1e0002-0000-4000-8000-000000000008
+		summarizeBy: sum
+		sourceColumn: Cups
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Sales = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("roastery-db", #"Warehouse Name"),
+				    sales = Source{[Name = "sales"]}[Data]
+				in
+				    sales
+
+	annotation PBI_ResultType = Table

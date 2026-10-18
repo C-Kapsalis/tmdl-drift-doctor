@@ -1,0 +1,5 @@
+version: '2.0'
+client: 'spinout-10'
+description: 'Data quality overlay for spinout-10 (fictional)'
+quality_thresholds:
+  null_rate_max: 0.05

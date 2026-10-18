@@ -1,0 +1,9 @@
+{
+  "template": "universal/Growth.SemanticModel",
+  "models": {
+    "bike-shop": {
+      "path": "bike-shop_db/Growth.SemanticModel"
+    }
+  },
+  "retired_tables": []
+}

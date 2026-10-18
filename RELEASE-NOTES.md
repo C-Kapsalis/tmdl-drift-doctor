@@ -17,8 +17,37 @@
   behind a guard that refuses any result in which the measure's
   description, declaration, properties or the following objects changed.
 
+- **Secondary models.** A fleet entry may list `secondary_models: [{name,
+  path, deviations}]`. Each is detected as a model of its own and inherits
+  the entry's gating, overrides and connection block.
+- **Typed override sections.** `overrides` may be a mapping of sections
+  (`measures`, `columns`, `expressions`, `source_views`, `tables`,
+  `relationships`, `fieldparam_entries`, `mapping_rows`, `files`) in place of
+  the flat list, which keeps working. A `columns` entry with `kind:
+  extension` acknowledges a derived-only column; a bare measure name with
+  `kind: absent` covers that measure on any table.
+- **File exemptions (`overrides.files`).** `remediate` never writes a file a
+  model declares exempt, and `detect` reports drift whose fix would touch it
+  as overridden. `drift-doctor overrides check|files|is-exempt` inspect the
+  declarations.
+- **`drift-doctor fleet check|connection|family`.** Validates the
+  configuration, per-model overlay files and a connection-parameter stamping
+  table; resolves a model's declared warehouse target; lists a family's
+  members.
+- **More validation.** Duplicate model paths, malformed workspace blocks,
+  `metadata.total` mismatches, secondary models without `deviations`, a
+  growth family with fewer than two suffixes and a connection parameter in
+  `allowlist.expressions` are configuration errors. Model entries accept
+  `gating_reason`, `connection`, `family` and `workspace`.
+
 ### Changed
 
+- **Configuration errors exit 2 (breaking).** A malformed or unresolvable
+  `fleet.yml`, and an unknown `--model`, now exit 2 instead of 1, so CI can
+  tell a broken configuration from drift.
+- **Allowlist entries are dotted prefixes.** `measure` allows every
+  `measure.*` kind and `measure.missing` also allows `measure.missing.*`;
+  `measure.miss` allows nothing. `--kind` filters match the same way.
 - **Shared expressions are compared with their comments (stricter).**
   `expression.drift` used to strip comments and collapse whitespace; it now
   drops only lineage-tag lines and puts the `meta [...]` bag in canonical

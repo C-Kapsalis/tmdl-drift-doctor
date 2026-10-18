@@ -1,0 +1,5 @@
+version: '2.0'
+client: 'shopify'
+description: 'Mapping overlay for shopify (fictional)'
+table_mappings:
+  Orders: Orders

@@ -1,0 +1,20 @@
+table '#Report Measures'
+	lineageTag: 7a1e0000-0000-4000-8000-000000000255
+
+	column z
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000256
+		summarizeBy: none
+		sourceColumn: z
+
+	measure Rides = SUM(Ads[clicks])
+		lineageTag: 7a1e0000-0000-4000-8000-000000000257
+
+	partition '#Report Measures' = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

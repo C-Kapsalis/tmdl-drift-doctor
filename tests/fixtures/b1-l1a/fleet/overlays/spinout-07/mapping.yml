@@ -1,0 +1,5 @@
+version: '2.0'
+client: 'spinout-07'
+description: 'Mapping overlay for spinout-07 (fictional)'
+table_mappings:
+  Orders: Orders

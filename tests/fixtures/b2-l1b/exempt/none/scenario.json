@@ -1,0 +1,9 @@
+{
+  "template": "universal/Shop.SemanticModel",
+  "models": {
+    "bike-shop": {
+      "path": "bike-shop_db/Shop.SemanticModel",
+      "files": []
+    }
+  }
+}

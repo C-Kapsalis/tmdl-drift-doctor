@@ -59,7 +59,7 @@ def test_unresolvable_object_fails_detection(fleet_dir):
     with pytest.raises(DriftDoctorError, match="Totl Visits"):
         detect_all(fleet)
     r = _cli(fleet_dir, "detect")
-    assert r.exit_code == 1 and "do not resolve" in r.output
+    assert r.exit_code == 2 and "do not resolve" in r.output
 
 
 def test_overridden_finding_is_acked_not_remediated(fleet_dir):

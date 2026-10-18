@@ -1,0 +1,32 @@
+table 'Store Orders'
+	lineageTag: 7a1e0000-0000-4000-8000-000000000041
+
+	column order_id
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000042
+		summarizeBy: none
+		sourceColumn: order_id
+
+	column store_id
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000043
+		summarizeBy: none
+		sourceColumn: store_id
+
+	column amount
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000044
+		summarizeBy: none
+		sourceColumn: amount
+
+	measure 'Order Total' = SUM('Store Orders'[amount])
+		lineageTag: 7a1e0000-0000-4000-8000-000000000045
+
+	partition 'Store Orders' = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

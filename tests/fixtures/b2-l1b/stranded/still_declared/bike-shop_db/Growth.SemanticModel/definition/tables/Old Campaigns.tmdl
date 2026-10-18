@@ -1,0 +1,17 @@
+table 'Old Campaigns'
+	lineageTag: 7a1e0000-0000-4000-8000-000000000156
+
+	column campaign_id
+		dataType: string
+		lineageTag: 7a1e0000-0000-4000-8000-000000000157
+		summarizeBy: none
+		sourceColumn: campaign_id
+
+	partition 'Old Campaigns' = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

@@ -1,0 +1,30 @@
+{
+  "template": "universal/Performance.SemanticModel",
+  "models": {
+    "bike-shop": {
+      "path": "bike-shop_db/Growth.SemanticModel"
+    },
+    "roastery": {
+      "path": "roastery_db/Growth.SemanticModel",
+      "declared": [
+        "f-Filters[f-All]"
+      ]
+    },
+    "spinout-03": {
+      "path": "spinout_03_db/Growth.SemanticModel"
+    },
+    "spinout-07": {
+      "path": "spinout_07_db/Growth.SemanticModel"
+    },
+    "cycle-hub": {
+      "path": "cycle-hub_db/Growth.SemanticModel"
+    },
+    "bakery": {
+      "path": "bakery_db/Growth.SemanticModel"
+    },
+    "kiosk": {
+      "path": "kiosk_db/Growth.SemanticModel",
+      "gating": "advisory"
+    }
+  }
+}

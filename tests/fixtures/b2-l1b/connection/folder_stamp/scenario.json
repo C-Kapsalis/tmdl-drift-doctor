@@ -1,0 +1,37 @@
+{
+  "default_project": "example-project-2",
+  "models": {
+    "bike-shop": {
+      "path": "bike-shop_db/Growth.SemanticModel",
+      "connection": {}
+    },
+    "roastery": {
+      "path": "roastery_db/Growth.SemanticModel",
+      "connection": {
+        "dataset": "bike-shop_db"
+      }
+    },
+    "spinout-13": {
+      "path": "spinout_13_db/Growth.SemanticModel",
+      "connection": {
+        "project": "example-project-1",
+        "dataset": "spinout_12_db"
+      }
+    }
+  },
+  "stamps": {
+    "bike-shop_db": {
+      "v-db": "\"bike-shop_db\"",
+      "v-BQ_project": "\"example-project-2\""
+    },
+    "roastery_db": {
+      "v-db": "\"roastery_db\"",
+      "v-BQ_db": "\"roastery_db\""
+    },
+    "spinout_13_db": {
+      "v-db": "\"spinout_12_db\"",
+      "v-BQ_project": "\"example-project-1\"",
+      "v-BQ_billing_project": "\"example-project-1\""
+    }
+  }
+}

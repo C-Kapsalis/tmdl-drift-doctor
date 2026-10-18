@@ -1,0 +1,4 @@
+expression 'Warehouse Name' = "roastery-warehouse" meta [IsParameterQuery = true, Type = "Text", IsParameterQueryRequired = true]
+	lineageTag: 5a1e0003-0000-4000-8000-000000000001
+
+	annotation PBI_ResultType = Text

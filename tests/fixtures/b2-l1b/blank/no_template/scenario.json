@@ -1,0 +1,20 @@
+{
+  "template": "universal/Performance.SemanticModel",
+  "models": {
+    "bike-shop": {
+      "path": "bike-shop_db/Growth.SemanticModel"
+    },
+    "roastery": {
+      "path": "roastery_db/Growth.SemanticModel"
+    },
+    "wide-hub": {
+      "path": "wide-hub_db/Growth.SemanticModel"
+    },
+    "cafe": {
+      "path": "cafe_db/Growth.SemanticModel"
+    },
+    "kiosk": {
+      "path": "kiosk_db/Growth.SemanticModel"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+table __Calendar
+	lineageTag: 5a1e0004-0000-4000-8000-000000000001
+
+	column Date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: 5a1e0004-0000-4000-8000-000000000002
+		summarizeBy: none
+		sourceColumn: [Date]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Month
+		dataType: string
+		lineageTag: 5a1e0004-0000-4000-8000-000000000003
+		summarizeBy: none
+		sourceColumn: [Month]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Year
+		dataType: int64
+		lineageTag: 5a1e0004-0000-4000-8000-000000000004
+		summarizeBy: none
+		sourceColumn: [Year]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition __Calendar = calculated
+		mode: import
+		source = CALENDAR(DATE(2024, 1, 1), DATE(2025, 12, 31))
+
+	annotation PBI_ResultType = Table

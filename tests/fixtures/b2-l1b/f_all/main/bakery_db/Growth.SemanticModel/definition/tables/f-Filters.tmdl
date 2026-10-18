@@ -1,0 +1,17 @@
+table 'f-Filters'
+	lineageTag: 7a1e0000-0000-4000-8000-000000000324
+
+	measure 'f-Ads' = int(not ISEMPTY('Ads'))
+		lineageTag: 7a1e0000-0000-4000-8000-000000000325
+
+	measure 'f-Email' = 1
+		lineageTag: 7a1e0000-0000-4000-8000-000000000326
+
+	partition 'f-Filters' = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

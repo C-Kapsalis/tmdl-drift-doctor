@@ -1,0 +1,7 @@
+version: '2.0'
+client: 'shopify'
+description: 'Policy overlay for shopify (fictional roastery stand-in)'
+performance:
+  max_query_seconds: 30
+validation:
+  strict: true

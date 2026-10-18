@@ -1,0 +1,20 @@
+table 'Helper Measures'
+	lineageTag: 7a1e0000-0000-4000-8000-000000000127
+
+	measure 'Has Ads' = int(not ISEMPTY('Ads'))
+		lineageTag: 7a1e0000-0000-4000-8000-000000000128
+
+	measure 'Ad Signal' =
+			VAR has_ads = int(not ISEMPTY('Ads'))
+			RETURN
+			    [Clicks] + int(not ISEMPTY('Old Campaigns'))
+		lineageTag: 7a1e0000-0000-4000-8000-000000000129
+
+	partition 'Helper Measures' = m
+		mode: import
+		source =
+				let
+				    Source = #table({"id"}, {})
+				in
+				    Source
+

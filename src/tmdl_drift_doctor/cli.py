@@ -9,9 +9,13 @@
     drift-doctor ledger    --fleet fleet.yml [--json]
     drift-doctor ledger    --fleet fleet.yml --revive REF --kind KIND [--model NAME]
 
-Exit codes: 0 success / clean; 1 actionable drift, a ratchet violation, a
-failed fix, or a usage/config error; 2 a report the ratchet refuses to
-trust; 3 a model that could not be parsed; 4 audit found a reverted fix.
+    drift-doctor fleet     check|connection|family --fleet fleet.yml
+    drift-doctor overrides check|files|is-exempt --fleet fleet.yml
+
+Exit codes: 0 success / clean; 1 actionable drift, a ratchet violation or a
+failed fix; 2 a usage or configuration error (including a report the
+ratchet refuses to trust); 3 a model that could not be parsed; 4 audit
+found a reverted fix.
 """
 
 from __future__ import annotations
@@ -33,6 +37,12 @@ from .remediate import remediate as run_remediate
 from .remediate import remediate_converge
 
 PARSE_ERROR_EXIT = 3
+USAGE_EXIT = 2
+
+
+class ConfigError(click.ClickException):
+    """A usage or configuration problem: exit 2, nothing was acted on."""
+    exit_code = USAGE_EXIT
 
 
 def _fleet_option(fn):
@@ -45,7 +55,7 @@ def _load(fleet_path):
     try:
         return load_fleet(fleet_path)
     except DriftDoctorError as e:
-        raise click.ClickException(str(e))
+        raise ConfigError(str(e))
 
 
 def _fresh_baseline(fleet, allow_stale: bool):
@@ -63,7 +73,7 @@ def _detect(fleet, baseline, errors=None, **kw):
         return detect_fleet(fleet, baseline, Ledger(fleet.ledger_path),
                             errors=errors, **kw)
     except DriftDoctorError as e:
-        raise click.ClickException(str(e))
+        raise ConfigError(str(e))
 
 
 @click.group()
@@ -162,7 +172,7 @@ def _print_findings(fleet, findings, errors, model_filter, kind_filter):
             tags = []
             if f.advisory:
                 tags.append("[advisory]")
-            elif f.kind not in fleet.allowlist_kinds:
+            elif not fleet.allows(f.kind):
                 tags.append("[not allowlisted]")
             if f.blocked:
                 tags.append("[blocked]")
@@ -482,6 +492,135 @@ def ledger(fleet_path, as_json, revive_ref, kind, model, note) -> None:
         if e.get("note"):
             parts.append(f"({e['note']})")
         click.echo("  ".join(p for p in parts if p))
+
+
+# ───────────────────────────── fleet ─────────────────────────────
+
+@main.group("fleet")
+def fleet_group() -> None:
+    """Validate fleet.yml and answer questions about its models."""
+
+
+@fleet_group.command("check")
+@_fleet_option
+@click.option("--stamps", "stamps_path", default=None, metavar="FILE",
+              help="A connection-parameter stamping table (YAML keyed by "
+                   "model folder) to check against the fleet's declarations.")
+def fleet_check(fleet_path, stamps_path) -> None:
+    """Validate fleet.yml, the per-model overlay files and (with --stamps) a
+    stamping table. Exit 2 on a configuration problem, 1 when the stamping
+    table disagrees with the fleet, else 0."""
+    import yaml
+    from .fleet import overlay_problems, stamp_problems
+    fleet = _load(fleet_path)
+    problems = overlay_problems(fleet)
+    for line in problems:
+        click.echo(line)
+    if problems:
+        sys.exit(USAGE_EXIT)
+    if stamps_path:
+        try:
+            stamps = yaml.safe_load(Path(stamps_path).read_text(
+                encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as e:
+            raise ConfigError(f"cannot read {stamps_path}: {e}")
+        bad = stamp_problems(fleet, stamps)
+        for line in bad:
+            click.echo(line)
+        if bad:
+            sys.exit(1)
+    click.echo(f"fleet.yml is valid: {len(fleet.models)} model(s).")
+
+
+@fleet_group.command("connection")
+@_fleet_option
+@click.argument("model")
+def fleet_connection(fleet_path, model) -> None:
+    """Print PROJECT<TAB>BILLING<TAB>DATASET for MODEL (always three fields;
+    an empty project means "keep the template's default")."""
+    fleet = _load(fleet_path)
+    if model not in fleet.models:
+        raise ConfigError(f"unknown model '{model}'; fleet.yml defines: "
+                          f"{', '.join(fleet.models)}")
+    click.echo("\t".join(fleet.connection(model)))
+
+
+@fleet_group.command("family")
+@_fleet_option
+@click.argument("family")
+def fleet_family(fleet_path, family) -> None:
+    """Print the ids of FAMILY's members, sorted and comma-separated. An
+    empty family is an error (exit 1): a zero must never pass silently."""
+    from .families import members
+    fleet = _load(fleet_path)
+    names = members(fleet, family)
+    if not names:
+        click.echo(f"no fleet model belongs to the '{family}' family",
+                   err=True)
+        sys.exit(1)
+    click.echo(",".join(names))
+
+
+# ───────────────────────────── overrides ─────────────────────────────
+
+@main.group("overrides")
+def overrides_group() -> None:
+    """Inspect declared divergence (fleet.yml `overrides`)."""
+
+
+def _known_model(fleet, model):
+    if model not in fleet.models:
+        raise ConfigError(f"unknown model '{model}'; fleet.yml defines: "
+                          f"{', '.join(fleet.models)}")
+
+
+@overrides_group.command("check")
+@_fleet_option
+def overrides_check(fleet_path) -> None:
+    """Check that every file exemption protects something: it resolves in
+    the template and in the declaring model, and the model's copy still
+    differs. Exit 1 when any declaration is stale."""
+    from .hygiene import file_exemption_problems
+    fleet = _load(fleet_path)
+    problems = file_exemption_problems(fleet)
+    for line in problems:
+        click.echo(line)
+    if problems:
+        sys.exit(1)
+    click.echo("every override still protects something.")
+
+
+@overrides_group.command("files")
+@_fleet_option
+@click.option("--model", required=True, help="The declaring model.")
+@click.option("--item", default=None,
+              help="Only exemptions under this top-level item (for example "
+                   "Shop.SemanticModel), printed relative to it.")
+def overrides_files(fleet_path, model, item) -> None:
+    """Print the model's exempt file patterns, one bare pattern per line."""
+    fleet = _load(fleet_path)
+    _known_model(fleet, model)
+    for pat in fleet.exempt_patterns(model):
+        pat = (pat or "").strip()
+        if not pat:
+            continue
+        if item is None:
+            click.echo(pat)
+        elif pat.startswith(item.rstrip("/") + "/"):
+            click.echo(pat[len(item.rstrip("/")) + 1:])
+
+
+@overrides_group.command("is-exempt")
+@_fleet_option
+@click.option("--model", required=True, help="The declaring model.")
+@click.argument("path")
+def overrides_is_exempt(fleet_path, model, path) -> None:
+    """Exit 0 when PATH (relative to the model root) is exempt from the
+    template cascade, 3 when it is not."""
+    fleet = _load(fleet_path)
+    _known_model(fleet, model)
+    if fleet.file_override(model, path) is None:
+        sys.exit(3)
 
 
 if __name__ == "__main__":
