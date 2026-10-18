@@ -37,9 +37,12 @@ from . import TmdlEditError
 
 # A line that begins a new one-tab object inside a table file (or the
 # table-level annotation tail). `///` description lines belong to the NEXT
-# object and open its block.
+# object and open its block. Table-level blocks such as refreshPolicy end the
+# previous object too: without them, a table's last column would carry the
+# refresh policy along when it is copied or removed.
 _OBJECT_BOUNDARY = re.compile(
-    r"^\t(?:///|column\b|measure\b|partition\b|hierarchy\b|annotation\b)"
+    r"^\t(?:///|column\b|measure\b|partition\b|hierarchy\b|annotation\b"
+    r"|refreshPolicy\b|calculationGroup\b|changedProperty\b|extendedProperty\b)"
 )
 
 # TMDL property keywords that must never appear inside an expression body.

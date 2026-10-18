@@ -1,5 +1,18 @@
 # Release notes
 
+## Unreleased
+
+### Fixed
+
+- **A table's last column no longer carries its refresh policy.** Copying
+  or removing the last column of a table also copied or removed the
+  table's `refreshPolicy` block, because the block boundary stopped only at
+  columns, measures, partitions, hierarchies and annotations. `remediate`
+  adding a missing last column copied the template's policy into the
+  spinout; removing one deleted the spinout's policy. `refreshPolicy`,
+  `calculationGroup`, `changedProperty` and `extendedProperty` now end a
+  block too.
+
 ## v1.1.0 (2026-10-12)
 
 Relationships, cross-host measures, guarded retirements, and the governance

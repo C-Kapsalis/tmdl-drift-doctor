@@ -161,3 +161,54 @@ class TestBlockSurgery:
         removed_first = te.remove_mapping_row(src, "a")
         assert set(parse_mapping_rows(removed_first)) == {"b"}
         assert ",\n" not in removed_first  # no dangling separator comma
+
+
+REFRESH_POLICY_TAIL = (
+    "table Orders\n"
+    "\tlineageTag: 00000000-0000-4000-8000-000000000010\n"
+    "\n"
+    "\tcolumn order_id\n"
+    "\t\tdataType: int64\n"
+    "\t\tlineageTag: 00000000-0000-4000-8000-000000000011\n"
+    "\t\tsourceColumn: order_id\n"
+    "\n"
+    "\tcolumn order_date\n"
+    "\t\tdataType: dateTime\n"
+    "\t\tlineageTag: 00000000-0000-4000-8000-000000000012\n"
+    "\t\tsourceColumn: order_date\n"
+    "\n"
+    "\trefreshPolicy\n"
+    "\t\tpolicyType: basic\n"
+    "\t\trollingWindowGranularity: year\n"
+    "\t\trollingWindowPeriods: 3\n"
+    "\t\tincrementalGranularity: day\n"
+    "\t\tincrementalPeriods: 10\n"
+    "\t\tsourceExpression =\n"
+    "\t\t\t\tlet\n"
+    "\t\t\t\t    Source = Orders\n"
+    "\t\t\t\tin\n"
+    "\t\t\t\t    Source\n"
+)
+
+
+class TestTableLevelBoundaries:
+    """A table's last column must not swallow the table-level blocks after it."""
+
+    def test_extract_last_column_stops_before_refresh_policy(self):
+        block = te.extract_block(REFRESH_POLICY_TAIL, "column", "order_date")
+        assert block.startswith("\tcolumn order_date")
+        assert "refreshPolicy" not in block
+        assert "sourceExpression" not in block
+
+    def test_remove_last_column_keeps_refresh_policy(self):
+        removed = te.remove_block(REFRESH_POLICY_TAIL, "column", "order_date")
+        assert "order_date" not in removed
+        assert "\trefreshPolicy\n" in removed
+        assert "\t\tsourceExpression =\n" in removed
+        assert "column order_id" in removed
+
+    @pytest.mark.parametrize("keyword", ["calculationGroup", "changedProperty", "extendedProperty"])
+    def test_other_table_level_children_end_a_block(self, keyword):
+        content = REFRESH_POLICY_TAIL.replace("\trefreshPolicy\n", f"\t{keyword}\n", 1)
+        block = te.extract_block(content, "column", "order_date")
+        assert keyword not in block
