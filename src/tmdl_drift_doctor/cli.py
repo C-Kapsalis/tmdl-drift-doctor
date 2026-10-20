@@ -68,7 +68,10 @@ def _fresh_baseline(fleet, allow_stale: bool):
             ensure_baseline_fresh(fleet, baseline)
         return baseline
     except StaleBaselineError as e:
-        raise click.ClickException(str(e))
+        # A stale baseline is a configuration problem, not a finding: exit 2
+        # (never 1), so a CI job reads it as "the run could not be done"
+        # rather than as "the model has drift".
+        raise ConfigError(str(e))
 
 
 def _detect(fleet, baseline, errors=None, **kw):

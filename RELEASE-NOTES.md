@@ -346,6 +346,14 @@
 
 ### Fixed
 
+- **A stale baseline now exits 2, not 1.** When the committed baseline no
+  longer matches the live template, the findings computed against it are
+  misclassified (a retired object looks missing and gets resurrected). The
+  commands that need the baseline — `detect`, `remediate`, `ratchet check`,
+  `ratchet tighten` and `review` — refused, but they exited 1, the code
+  reserved for actionable findings: a CI job read a configuration problem
+  as a verdict about a model. They now exit 2, say so on standard error and
+  print no findings summary. `--allow-stale` still proceeds.
 - **An object whose name holds a square bracket can be remediated.** The
   reference of an object is a table name and an object name joined with
   brackets, and a name may legitimately hold a bracket of its own
