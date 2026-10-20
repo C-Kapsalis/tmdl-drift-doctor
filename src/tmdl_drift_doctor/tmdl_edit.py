@@ -299,6 +299,112 @@ def assert_tmdl_valid(content: str) -> None:
                     f"the two occurrences and retry.")
             seen.add(m.group(1))
     assert_no_property_injection(content)
+    assert_properties_before_annotations(content)
+    assert_unique_vars(content)
+
+
+_TAIL_LINE = re.compile(r"^\t\t(?:annotation|changedProperty|extendedProperty)\b")
+
+
+def assert_properties_before_annotations(content: str) -> None:
+    """Refuse a simple property line that sits after the object's first
+    two-tab annotation / changedProperty line: TMDL lists an object's
+    properties first and its annotations last."""
+    tail_at = None
+    for i, ln in enumerate(content.split("\n")):
+        if _OBJECT_BOUNDARY.match(ln):
+            tail_at = None
+            continue
+        if _TAIL_LINE.match(ln):
+            if tail_at is None:
+                tail_at = i
+            continue
+        if tail_at is not None and _PROPERTY_LINE.match(ln):
+            raise TmdlEditError(
+                f"line {i + 1} sets a property after the annotation on line "
+                f"{tail_at + 1}; properties come before an object's "
+                f"annotations. Nothing was written.")
+
+
+_VAR_TOKEN = re.compile(r"\(|\)|\bVAR\s+([A-Za-z_][A-Za-z0-9_.]*)|\bRETURN\b",
+                        re.IGNORECASE)
+
+
+def duplicate_var(dax: str) -> Optional[str]:
+    """The first VAR name declared twice in one scope (same nesting level,
+    before that level's RETURN), or None."""
+    from .tmdl import blank_strings
+    text = re.sub(r"'[^']*'|\[[^\]]*\]", " ", blank_strings(dax or ""))
+    depth = 0
+    scopes: dict = {0: set()}
+    for m in _VAR_TOKEN.finditer(text):
+        tok = m.group(0)
+        if tok == "(":
+            depth += 1
+            scopes[depth] = set()
+        elif tok == ")":
+            scopes.pop(depth, None)
+            depth = max(depth - 1, 0)
+            scopes.setdefault(depth, set())
+        elif m.group(1):
+            name = m.group(1).casefold()
+            if name in scopes.setdefault(depth, set()):
+                return m.group(1)
+            scopes[depth].add(name)
+        else:   # RETURN closes the scope opened by this level's VARs
+            scopes[depth] = set()
+    return None
+
+
+def _measure_bodies(content: str):
+    """Yield (line number, name, DAX) for every measure in `content`."""
+    lines = content.split("\n")
+    decl = re.compile(r"^\tmeasure\s+(.+?)\s*=\s?(.*)$")
+    for i, ln in enumerate(lines):
+        m = decl.match(ln)
+        if not m:
+            continue
+        body, j = [m.group(2)], i + 1
+        fenced = m.group(2).strip() == "```"
+        while j < len(lines):
+            nxt = lines[j]
+            if fenced:
+                body.append(nxt)
+                if nxt.strip() == "```":
+                    break
+            elif nxt.startswith("\t\t\t") or not nxt.strip():
+                body.append(nxt)
+            else:
+                break
+            j += 1
+        yield i + 1, m.group(1), "\n".join(body)
+
+
+def assert_unique_vars(content: str) -> None:
+    """Refuse a measure whose DAX declares one VAR name twice in a scope
+    (the engine rejects the whole measure)."""
+    for line_no, name, dax in _measure_bodies(content):
+        dup = duplicate_var(dax)
+        if dup:
+            raise TmdlEditError(
+                f"measure {name} (line {line_no}) declares VAR {dup} twice "
+                f"in one scope. Nothing was written.")
+
+
+def assert_round_trip(content: str, keyword: str, name: str,
+                      intended: str) -> None:
+    """After splicing or moving a block, re-extract it: it must exist,
+    hold at most one fence pair, and equal the intended block exactly."""
+    got = extract_block(content, keyword, name)
+    if got is None:
+        raise TmdlEditError(f"{keyword} {name} cannot be found again after "
+                            f"the edit. Nothing was written.")
+    if got.count("```") > 2:
+        raise TmdlEditError(f"{keyword} {name} holds nested expression "
+                            f"fences after the edit. Nothing was written.")
+    if got.strip("\n") != intended.strip("\n"):
+        raise TmdlEditError(f"{keyword} {name} does not read back as the "
+                            f"block that was written. Nothing was written.")
 
 
 def guarded_write(path: Path, content: str) -> None:

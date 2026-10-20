@@ -254,10 +254,15 @@ def _print_findings(fleet, findings, errors, model_filter, kind_filter):
 @click.option("--confirm-deletions", is_flag=True,
               help="With --sync: the explicit second confirmation that lets "
                    "deletions run without a terminal (for scheduled jobs).")
+@click.option("--backup", is_flag=True,
+              help="Copy each file to <name>.bak_<timestamp> before its first "
+                   "write in this run; the copies are removed when the run "
+                   "succeeds and kept when anything failed.")
 @click.option("--allow-stale", is_flag=True,
               help="Proceed on a stale baseline (misclassification risk).")
 def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
-              assume_yes, interactive, confirm_deletions, allow_stale) -> None:
+              assume_yes, interactive, confirm_deletions, backup,
+              allow_stale) -> None:
     """Cascade template truth into the derived models (allowlist-gated).
 
     On a terminal every fix is confirmed (y/n, a = yes to the rest, q =
@@ -281,19 +286,22 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
     deletions_ok = sync and (confirm_deletions or (terminal and not assume_yes))
     kw = dict(kind=list(kinds), dry_run=dry_run, sync=sync, baseline=baseline,
               allow_destructive=deletions_ok or dry_run,
-              batch_only=assume_yes)
+              batch_only=assume_yes, backup=backup)
     if not dry_run and not assume_yes:
         if terminal:
             answers = {"all": False, "quit": False}
 
-            def confirm(f, label, changes):
+            def confirm(f, label, changes, position=None):
                 if answers["quit"]:
                     return False, "stopped (q)"
                 if answers["all"] and not is_destructive(f.kind):
                     return True, ""
+                where = "[%d/%d] " % position if position else ""
+                warn = " DESTRUCTIVE (deletes derived-model content)." \
+                    if is_destructive(f.kind) else ""
                 try:
-                    answer = ask(f"{f.model}: {f.kind} {f.ref} — {label}. "
-                                 f"Apply?", allow_all=True)
+                    answer = ask(f"{where}{f.model}: {f.kind} {f.ref} — "
+                                 f"{label}.{warn} Apply?", allow_all=True)
                 except Quit:
                     answers["quit"] = True
                     return False, "stopped (q)"
@@ -306,10 +314,11 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
                        "(non-interactive). Pass --yes with --kind to apply "
                        "batch-safe kinds.")
 
-            def confirm(f, label, changes):
+            def confirm(f, label, changes, position=None):
                 if is_destructive(f.kind) and deletions_ok:
                     return True, ""
-                return False, "non-interactive: not applied without --yes"
+                return (False, "non-interactive: not applied without --yes",
+                        "skipped_noninteractive")
         kw["confirm"] = confirm
     if converge:
         results = remediate_converge(fleet, detect_once, **kw)
@@ -323,7 +332,7 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
         if len(results) > 1:
             click.echo(f"\n══ pass {n}")
         _print_outcomes(result, dry_run)
-        failed += result.count("failed")
+        failed += result.count("failed") + len(result.errors)
     if converge and not dry_run:
         last = results[-1]
         state = ("converged" if last.count("applied") == 0
@@ -339,7 +348,15 @@ def _print_outcomes(result, dry_run):
         f = o.finding
         if o.status in ("applied", "would-apply"):
             verb = "would apply" if o.status == "would-apply" else "applied"
-            click.echo(f"[{verb}] {f.model}: {f.kind} {f.ref} — {o.reason}")
+            mode = ""
+            if o.status == "would-apply":
+                from .remediate import is_batch_safe
+                mode = (" [destructive: asked, never under --yes]"
+                        if is_destructive(f.kind) else
+                        " [asked; batch-safe under --yes]"
+                        if is_batch_safe(f.kind) else " [asked]")
+            click.echo(f"[{verb}] {f.model}: {f.kind} {f.ref} — "
+                       f"{o.reason}{mode}")
             if dry_run:
                 for c in o.changes:
                     click.echo(c.diff())
@@ -359,9 +376,16 @@ def _print_outcomes(result, dry_run):
             click.echo(f"[skipped] {f.model}: {f.kind} {f.ref} — {o.reason}")
     for notice in result.notices:
         click.echo(f"[notice] {notice.get('message') if isinstance(notice, dict) else notice}")
+    for err in result.errors:
+        click.echo(f"[FAILED] {err}", err=True)
+    if result.backups_removed:
+        click.echo(f"backups: removed {result.backups_removed} safety "
+                   f"cop{'y' if result.backups_removed == 1 else 'ies'}")
+    for path in result.backups_kept:
+        click.echo(f"backups: kept {path} (the run had failures)")
     click.echo(f"\n── summary: applied={result.count('applied')} "
                f"would-apply={result.count('would-apply')} "
-               f"skipped={result.count('skipped')} "
+               f"skipped={result.count('skipped') + result.count('skipped_noninteractive')} "
                f"manual={result.count('manual')} "
                f"blocked={result.count('blocked')} "
                f"auto_skipped_precondition="
@@ -370,6 +394,8 @@ def _print_outcomes(result, dry_run):
                f"skipped_override={result.count('skipped_override')} "
                f"skipped_divergent={result.count('skipped_divergent')} "
                f"skipped_destructive={result.count('skipped_destructive')} "
+               f"skipped_noninteractive="
+               f"{result.count('skipped_noninteractive')} "
                f"failed={result.count('failed')}")
 
 

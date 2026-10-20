@@ -244,7 +244,16 @@ never inserts a name that already exists anywhere in the model. Full detection r
   are regenerated on insert and preserved on overwrite, and every new file
   must pass validation before it touches disk. That validation includes the
   invariant that a property line is never inserted into a DAX expression
-  body.
+  body, refuses a property placed after an object's annotations and a DAX
+  `VAR` declared twice in one scope, and re-reads every spliced block to
+  confirm it landed exactly as intended.
+- **Derived-only files are left alone.** A file the template does not have
+  (a model's own table, its report overlay) is never written by an ordinary
+  fix; only kinds that exist to do so (removals, moves, reference rewrites)
+  may touch it. A run that finds such a file changed behind its back fails
+  with an `OVERLAY` error. `remediate --backup` keeps a `<file>.bak_<time>`
+  copy of each file before its first write and removes the copies when the
+  run succeeds (git stays the recommended undo).
 
 The write guards exist because of a real failure mode: inserting `isHidden`
 after `measure X =` when the expression is bare multi-line puts the property

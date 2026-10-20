@@ -82,6 +82,22 @@
   `skipped_override` (an override found at apply time, so a stale finding
   never writes a declared divergence), `skipped_divergent` (a modified
   relationship on a source-divergent table) and `skipped_destructive`.
+- **More write guards.** A property after an object's first annotation or
+  `changedProperty` line, and a DAX `VAR` name declared twice in one scope,
+  are refused before anything is written. Every inserted, overwritten or
+  moved block is read back after the edit and must equal what was intended.
+- **Derived-only files are protected for the whole run.** `remediate` hashes
+  every file a model has and the template does not before it writes; an
+  ordinary fix that would write one fails with `OVERLAY`, and a change to
+  one that no fix declared fails the run (exit 1).
+- **`remediate --backup`.** One `<file>.bak_<YYYYMMDD_HHMMSS>` copy per file
+  before its first write in the run; removed (and counted) when the run
+  succeeds, kept when anything failed. Never in a dry run.
+- **Clearer confirmations.** Each question shows its position (`[3/12]`)
+  and flags deletions as destructive; `--dry-run` says per fix whether it
+  would be asked, is batch-safe under `--yes`, or is destructive. Items a
+  non-terminal run declines count under the new `skipped_noninteractive`
+  counter (and in `skipped`).
 
 ### Changed
 

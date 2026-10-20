@@ -85,6 +85,15 @@ class RunResult:
     outcomes: list = field(default_factory=list)
     notices: list = field(default_factory=list)   # e.g. view-enrichment
     digest: list = field(default_factory=list)    # decisions for a human
+    errors: list = field(default_factory=list)    # run-level failures
+    backups_removed: int = 0
+    backups_kept: list = field(default_factory=list)
+
+    @property
+    def applied(self) -> list:
+        """(kind, ref) of every applied fix, in order (feeds receipts)."""
+        return [(o.finding.kind, o.finding.ref) for o in self.outcomes
+                if o.status == "applied"]
 
     def count(self, status: str) -> int:
         return sum(1 for o in self.outcomes if o.status == status)
@@ -145,7 +154,8 @@ def _cascade_object(fleet: Fleet, f: Finding, keyword: str,
     d_content = d_file.read_text(encoding="utf-8")
     existing = te.extract_block(d_content, keyword, obj)
     if existing is None:
-        new = insert(d_content, te.regenerate_lineage_tag(block))
+        new_block = te.regenerate_lineage_tag(block)
+        new = insert(d_content, new_block)
         label = f"insert {keyword} block from template (fresh lineage tag)"
     else:
         tag = te.first_lineage_tag(existing)
@@ -153,6 +163,7 @@ def _cascade_object(fleet: Fleet, f: Finding, keyword: str,
             else te.regenerate_lineage_tag(block)
         new = te.replace_block(d_content, keyword, obj, new_block)
         label = f"overwrite {keyword} block from template (lineage tag preserved)"
+    te.assert_round_trip(new, keyword, obj, new_block)
     return (label, [FileChange(d_file, d_content, new)])
 
 
@@ -328,6 +339,7 @@ def _apply_measure_wrong_host(fleet: Fleet, f: Finding) -> tuple:
             f"model changed after detection. Re-run `drift-doctor detect`.")
     new_src = te.remove_block(src, "measure", name)
     new_dst = te.insert_measure_block(dst, block)
+    te.assert_round_trip(new_dst, "measure", name, block)
     return (f"move measure block verbatim from '{f.data['from_table']}' to "
             f"the template's host '{f.data['to_table']}' (DAX and lineage "
             f"tag untouched)",
@@ -715,7 +727,8 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
               baseline: Optional[dict] = None,
               confirm: Optional[Callable] = None,
               batch_only: bool = False,
-              allow_destructive: bool = True) -> RunResult:
+              allow_destructive: bool = True,
+              backup: bool = False) -> RunResult:
     """Apply every admitted finding. The Python API is the batch engine: it
     applies what the gates admit without asking. The CLI passes
     `confirm(finding, label, changes) -> (ok, reason)` for the interactive
@@ -732,9 +745,13 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
     def out(f, status, reason="", changes=None):
         result.outcomes.append(Outcome(f, status, reason, changes or []))
 
-    for f in sorted(findings, key=_phase):
-        if kinds and not any(kind_matches(f.kind, k) for k in kinds):
-            continue
+    admitted = [f for f in sorted(findings, key=_phase)
+                if not kinds or any(kind_matches(f.kind, k) for k in kinds)]
+    overlay = OverlayWatch(fleet)
+    for model in dict.fromkeys(f.model for f in admitted):
+        overlay._scan(model)
+    backups = Backups() if backup and not dry_run else None
+    for position, f in enumerate(admitted, 1):
         if f.overridden:
             o = f.override
             out(f, "overridden",
@@ -805,6 +822,13 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 out(f, "skipped", str(skip))
                 continue
             exempt = _exempt_change(fleet, f, changes)
+            touched = overlay.refuses(f, changes)
+            if touched:
+                out(f, "failed",
+                    f"OVERLAY: {touched} exists only in the derived model; "
+                    f"kind '{f.kind}' never alters a derived-only file. "
+                    f"Nothing was written.")
+                continue
             if exempt is not None:
                 out(f, "overridden",
                     f"{exempt.path} is exempt from the template cascade "
@@ -818,11 +842,15 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 out(f, "would-apply", label, changes)
                 continue
             if confirm is not None:
-                ok, why = confirm(f, label, changes)
+                answer = confirm(f, label, changes, (position, len(admitted)))
+                ok, why = answer[0], answer[1]
                 if not ok:
-                    out(f, "skipped", why)
+                    out(f, answer[2] if len(answer) > 2 else "skipped", why)
                     continue
             for c in changes:   # in order: a move writes its destination first
+                if backups is not None:
+                    backups.save(c.path)
+                overlay.allow(c.path)
                 if c.new is None:
                     if c.path.is_dir():
                         import shutil
@@ -844,7 +872,107 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
         except (DriftDoctorError, TmdlEditError, OSError) as e:
             out(f, "failed", str(e))
 
+    if not dry_run:
+        for path in overlay.changed():
+            result.errors.append(
+                f"OVERLAY: the derived-only file {path} changed during the "
+                f"run without any fix writing it; the run is reported as "
+                f"failed. Check the file and restore it from version "
+                f"control if the change is unwanted.")
+    if backups is not None:
+        if result.count("failed") or result.errors:
+            result.backups_kept = backups.kept()
+        else:
+            result.backups_removed = backups.remove_all()
     return result
+
+
+class Backups:
+    """``--backup``: one sibling copy (``<name>.bak_<timestamp>``) of each
+    file before its first write in the run."""
+
+    def __init__(self):
+        from datetime import datetime
+        self.stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.made: dict = {}
+
+    def save(self, path: Path) -> None:
+        import shutil
+        key = Path(path).resolve()
+        if key in self.made or not key.is_file():
+            return
+        copy = key.with_name(f"{key.name}.bak_{self.stamp}")
+        shutil.copy2(key, copy)
+        self.made[key] = copy
+
+    def kept(self) -> list:
+        return [str(p) for p in self.made.values() if p.exists()]
+
+    def remove_all(self) -> int:
+        n = 0
+        for copy in self.made.values():
+            try:
+                copy.unlink()
+                n += 1
+            except FileNotFoundError:
+                pass
+        return n
+
+
+# Kinds whose fix may legitimately write a file the template does not have
+# (a reference rewrite, a removal, a move between hosts).
+OVERLAY_WRITERS = ("measure.renamed", "measure.wrong_host", "retire",
+                   "purge", "category_group", "fieldparam.dangling_row",
+                   "selector.dangling_branch")
+
+
+class OverlayWatch:
+    """The run-level invariant: derived-only files (no template
+    counterpart at the same relative path) are never altered, except by a
+    kind that exists to do so. Hashes are taken lazily, per model, before
+    the run's first write to that model."""
+
+    def __init__(self, fleet: Fleet):
+        self.fleet = fleet
+        self.hashes: dict = {}       # path -> sha1 (or None when absent)
+        self.models: set = set()
+        self.allowed: set = set()
+
+    def _scan(self, model: str) -> None:
+        import hashlib
+        if model in self.models or model not in self.fleet.models:
+            return
+        self.models.add(model)
+        mdef = self.fleet.model_definition(model)
+        tdef = self.fleet.template_definition
+        for p in mdef.rglob("*"):
+            if p.is_file() and not (tdef / p.relative_to(mdef)).exists():
+                self.hashes[p.resolve()] = hashlib.sha1(
+                    p.read_bytes()).hexdigest()
+
+    def refuses(self, f: Finding, changes: list) -> str:
+        self._scan(f.model)
+        if any(kind_matches(f.kind, k) for k in OVERLAY_WRITERS):
+            return ""
+        for c in changes:
+            if Path(c.path).resolve() in self.hashes:
+                return str(c.path)
+        return ""
+
+    def allow(self, path) -> None:
+        self.allowed.add(Path(path).resolve())
+
+    def changed(self) -> list:
+        import hashlib
+        out = []
+        for p, h in self.hashes.items():
+            if p in self.allowed:
+                continue
+            now = hashlib.sha1(p.read_bytes()).hexdigest() if p.exists() \
+                else None
+            if now != h:
+                out.append(str(p))
+        return sorted(out)
 
 
 def _divergent_guard(fleet: Fleet, state, f: Finding) -> str:
