@@ -1026,3 +1026,54 @@ def drop_table(fleet, model_dir: Path, table: str, changes: list,
         report["file"] = str(tf.relative_to(Path(model_dir).parent))
         changes.append(Change(tf, tf.read_bytes(), None))
     return report
+
+
+# ───────────────────────── annotate ─────────────────────────
+
+def annotate(text: str, groups: list, prefix: str, descriptions: dict) -> tuple:
+    """(new model.tmdl text, counts): one ``annotation <prefix><Group>``
+    line per mapping group, existing human descriptions kept."""
+    pat = re.compile(r"^annotation " + re.escape(prefix) + r"([\w/]+) = (.*)$",
+                     re.MULTILINE)
+    existing = {}
+    for m in pat.finditer(text):
+        val = m.group(2)
+        a, b = val.find('"'), val.rfind('"')
+        existing[prefix + m.group(1)] = val[a + 1:b] if 0 <= a < b else val
+    wanted = {}
+    for g in groups:
+        key = g.replace(" ", "_")
+        wanted[prefix + key] = descriptions.get(key) or f"{g} metrics"
+    counts = {"kept": len(set(existing) & set(wanted)),
+              "added": len(set(wanted) - set(existing)),
+              "removed": len(set(existing) - set(wanted)),
+              "total": len(wanted)}
+    body = pat.sub("", text)
+    block = "".join(f"annotation {n} = \"{existing.get(n, wanted[n])}\"\n"
+                    for n in sorted(wanted))
+    m = re.search(r"^ref table ", body, re.MULTILINE)
+    if m:
+        at = m.start()
+        head, tail = body[:at], body[at:]
+        if head and not head.endswith("\n\n"):
+            head = head.rstrip("\n") + "\n\n"
+        body = head + block + "\n" + tail
+    else:
+        body = body.rstrip("\n") + "\n\n" + block
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    return body, counts
+
+
+def mapping_groups(definition, c) -> Optional[list]:
+    path = _tables_dir(definition) / f"{c['mapping_table']}.tmdl"
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    if not mc.is_encoded(text):
+        return []
+    try:
+        rows = mc.extract_rows(text)
+    except mc.CodecError:
+        return None
+    return sorted({str(r[0]).strip() for r in rows
+                   if isinstance(r, list) and r and str(r[0]).strip()})

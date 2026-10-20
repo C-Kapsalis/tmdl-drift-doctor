@@ -36,6 +36,9 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `gates` | `{prefix, aggregate}` | `f-`, `f-All` | Per-group gate measures and the aggregate gate the drop edits. |
 | `bookmarks` | `{group_column, exempt_display_names}` | `Analysis Category`, `++new report` | Which bookmark filters pin a group. |
 | `measure_liveness` | `{helper_prefixes, diagnostic_prefixes, always_live}` | `- _ !`, `i-`, `[]` | Which measures of a dropped group's component stay (user-facing, diagnostic, listed, bound in a report). |
+| `column_purge` | `{names, exceptions}` | empty | Model-only columns on shared tables with these names are removed in a sync run (`column.purge_listed`), except the listed `Table[column]` pairs. |
+| `selector_branch.helper_file` | file name | `Helper Measures.tmdl` | The table file `add-branch` edits. |
+| `grouping.descriptions` | mapping `Group_Name` -> text | `{}` | Descriptions `groups annotate` writes for new group annotations. |
 | `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |
 | `renames.columns` | mapping `Table.Old` -> `Table.New` | `{}` | Column renames (split at the last dot; cross-table moves are ignored). |
 | `renames.profiles` | mapping name -> `{measures, columns}` | `{}` | Alternative maps; a model selecting one (`rename_profile`) uses it INSTEAD of the default maps. |

@@ -562,7 +562,37 @@ def _apply_purge(fleet: Fleet, f: Finding) -> tuple:
     return apply_purge(fleet, f)
 
 
+def _apply_selector(fleet: Fleet, f: Finding) -> tuple:
+    from .selectors import apply_dangling
+    return apply_dangling(fleet, f)
+
+
+def _apply_extra_delete(fleet: Fleet, f: Finding) -> tuple:
+    """Delete a model-only object the person chose to drop (interactive)."""
+    derived, _ = _model_paths(fleet, f)
+    if f.kind == "relationship.extra":
+        path = derived / "relationships.tmdl"
+        old = path.read_text(encoding="utf-8")
+        new = te.remove_relationship_block(old, f.ref)
+        if new is None:
+            raise DriftDoctorError(f"relationship {f.ref} is gone; re-run "
+                                   f"detect")
+        return ("delete the model-only relationship",
+                [FileChange(path, old, new)])
+    table, obj = split_ref(f.ref)
+    keyword = "measure" if f.kind == "extra.measure" else "column"
+    path = _table_file(derived, table)
+    old = path.read_text(encoding="utf-8")
+    new = te.remove_block(old, keyword, obj)
+    if new is None:
+        raise DriftDoctorError(f"{keyword} {f.ref} is gone; re-run detect")
+    return (f"delete the model-only {keyword} from the model",
+            [FileChange(path, old, new)])
+
+
 APPLIERS: dict = {
+    "fieldparam.dangling_selector": _apply_selector,
+    "column.purge_listed": _apply_purge,
     "purge.fieldparam_entry": _apply_purge,
     "purge.measure": _apply_purge,
     "purge.column": _apply_purge,
@@ -836,6 +866,7 @@ BATCH_SAFE_KINDS = (
     "fieldparam.blank_row", "fieldparam.cross_level",
     "fieldparam.plot_specific_extra", "fieldparam.schema_modernize",
     "fieldparam.row_missing", "retire.source_view",
+    "fieldparam.dangling_selector",
 )
 
 # The field-parameter / mapping phase, in the order it is applied after the
@@ -853,7 +884,7 @@ DERIVED_PHASE_KINDS = (
 DESTRUCTIVE_PREFIXES = ("retire.table", "retire.column", "retire.measure",
                         "retire.mapping_row", "retire.mapping_category",
                         "retire.relationship", "retire.stranded_ref",
-                        "purge.")
+                        "purge.", "column.purge_listed")
 
 
 def is_destructive(kind: str) -> bool:
@@ -878,7 +909,8 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
               confirm: Optional[Callable] = None,
               batch_only: bool = False,
               allow_destructive: bool = True,
-              backup: bool = False) -> RunResult:
+              backup: bool = False,
+              offer_extra_delete: bool = False) -> RunResult:
     """Apply every admitted finding. The Python API is the batch engine: it
     applies what the gates admit without asking. The CLI passes
     `confirm(finding, label, changes) -> (ok, reason)` for the interactive
@@ -917,6 +949,35 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
             out(f, "overridden",
                 f"acknowledged by a fleet.yml override ({o.kind}): {o.reason}"
                 f" [owner {o.owner or '?'}, added {o.added or '?'}]")
+            continue
+        if f.advisory and offer_extra_delete and \
+                _extra_deletable(fleet, state, f):
+            if batch_only or confirm is None:
+                out(f, "skipped_destructive",
+                    "deleting a model-only object is never done in batch "
+                    "mode or under --yes; answer interactively")
+                continue
+            try:
+                label, changes = _apply_extra_delete(fleet, f)
+            except (DriftDoctorError, TmdlEditError) as e:
+                out(f, "failed", str(e))
+                continue
+            if dry_run:
+                out(f, "would-apply", label, changes)
+                continue
+            refs = _report_refs(fleet, f)
+            label += (f" ({refs} report ref(s) will break)"
+                      if refs else "")
+            answer = confirm(f, label, changes, (position, len(admitted)))
+            if not answer[0]:
+                out(f, answer[2] if len(answer) > 2 else "skipped", answer[1])
+                continue
+            for c in changes:
+                c.path.write_text(c.new, encoding="utf-8")
+            state.invalidate(f.model)
+            ledger.record_remediation(f.kind, f.model, f.ref, label,
+                                      files=[str(c.path) for c in changes])
+            out(f, "applied", label, changes)
             continue
         if f.advisory:
             out(f, "skipped",
@@ -1196,6 +1257,34 @@ def _divergent_guard(fleet: Fleet, state, f: Finding) -> str:
                 f"view than the template's; a relationship on a "
                 f"source-divergent table is decided by hand")
     return ""
+
+
+def _extra_deletable(fleet: Fleet, state, f: Finding) -> bool:
+    """Which advisory extras the interactive walk may offer to delete."""
+    if f.kind not in ("extra.measure", "extra.column", "relationship.extra"):
+        return False
+    if f.kind == "relationship.extra":
+        return True
+    table, obj = split_ref(f.ref)
+    if f.kind == "extra.measure":
+        if obj.startswith("i-"):
+            return False
+        m = state.model(f.model).measure(table, obj)
+        refs = dax_references(m.expression if m else "")
+        b_tables = set(state.baseline.get("tables") or {})
+        divergent = set(state.divergent_tables(f.model))
+        tables = {t for t, _n in refs["qualified"]} | refs["tables"]
+        tables &= set(state.model(f.model).tables)
+        return not any(t not in b_tables or t in divergent for t in tables)
+    from .fieldparams import fieldparam_files
+    return table not in fieldparam_files(fleet, fleet.model_definition(f.model))
+
+
+def _report_refs(fleet: Fleet, f: Finding) -> int:
+    if f.kind != "extra.measure":
+        return 0
+    from .renames import count_report_refs
+    return count_report_refs(fleet.models[f.model], split_ref(f.ref)[1]) or 0
 
 
 def _late_override(fleet: Fleet, f: Finding):

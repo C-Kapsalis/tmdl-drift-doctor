@@ -81,6 +81,8 @@ REMEDIABLE_KINDS = (
     "purge.relationship",
     "purge.zmap_row",
     "purge.table",
+    "column.purge_listed",
+    "fieldparam.dangling_selector",
 )
 
 # Kind families whose findings carry a per-category suffix
@@ -100,7 +102,8 @@ ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra",
 
 # Kinds detection offers only in --sync mode (the purge channel).
 SYNC_ONLY_KINDS = ("purge.fieldparam_entry", "purge.measure", "purge.column",
-                   "purge.relationship", "purge.zmap_row", "purge.table")
+                   "purge.relationship", "purge.zmap_row", "purge.table",
+                   "column.purge_listed")
 
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
@@ -502,6 +505,9 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
 
     # ── retirements (ledger-proven), with the coupling guard ──
     findings.extend(_retirements(name, model, live, baseline, retire))
+    findings.extend(_retired_aliases(name, model, baseline, retire, findings))
+    _protect(fleet, findings)
+    findings.extend(_revived_decisions(name, model, ledger))
     from .mappings import retirement_findings
     findings.extend(retirement_findings(name, fleet, model.definition,
                                         retire))
@@ -792,6 +798,78 @@ def _retirements(name: str, model: Model, live: dict, baseline: dict,
     return out
 
 
+def _retired_aliases(name: str, model: Model, baseline: dict, retire: dict,
+                     found: list) -> list:
+    """A model measure whose core name (one prefix sigil stripped) equals a
+    retired measure's, and which is no live template name, is retired too."""
+    from .renames import core_name
+    cores = {core_name(split_ref(ref)[1]) for (k, ref) in retire
+             if k == "measure"}
+    if not cores:
+        return []
+    live_names = {m for body in (baseline.get("tables") or {}).values()
+                  for m in (body.get("measures") or {})}
+    already = {f.ref for f in found if f.kind == "retire.measure"}
+    retired_refs = {ref for (k, ref) in retire if k == "measure"}
+    out = []
+    for tname, table in sorted(model.tables.items()):
+        for mname in sorted(table.measures):
+            ref = f"{tname}[{mname}]"
+            if mname in live_names or ref in already or ref in retired_refs:
+                continue
+            if core_name(mname) not in cores:
+                continue
+            blockers, _s = coupling_blockers(model, baseline, retire,
+                                             "measure", ref)
+            f = Finding(kind="retire.measure", model=name, ref=ref,
+                        detail=(f"measure {ref} is an alias of a measure "
+                                f"retired from the template (same core name)"),
+                        data={"alias": True})
+            if blockers:
+                f.data["blocked"] = blockers
+                f.detail += "; BLOCKED: " + "; ".join(blockers)
+            out.append(f)
+    return out
+
+
+def _protect(fleet: Fleet, findings: list) -> None:
+    """Removal paths never touch protected names: such retirements are
+    blocked for a person."""
+    from .purge import is_protected
+    for f in findings:
+        if f.kind.startswith("retire.") and f.kind != "retire.stranded_ref" \
+                and is_protected(fleet, f.ref):
+            f.data.setdefault("blocked", []).append(
+                "the name matches protected_name_pattern")
+
+
+def _revived_decisions(name: str, model: Model, ledger: Ledger) -> list:
+    """A retirement that was revived while the model still carries the
+    object: no removal, one digest line."""
+    out = []
+    seen = set()
+    for e in ledger.entries():
+        if e.get("event") != "revived" or e.get("model") not in (None, name):
+            continue
+        kind, ref = e.get("kind"), e.get("ref") or ""
+        if (kind, ref) in seen:
+            continue
+        present = False
+        if kind == "table":
+            present = ref in model.tables
+        elif kind in ("measure", "column") and ref.endswith("]"):
+            t, n = split_ref(ref)
+            present = (model.measure(t, n) if kind == "measure"
+                       else model.column(t, n)) is not None
+        if present:
+            seen.add((kind, ref))
+            out.append(decision(name, kind, ref,
+                                f"revived ({e.get('source') or 'manual'}); "
+                                f"retirement skipped",
+                                for_kind=f"retire.{kind}"))
+    return out
+
+
 def _own_work_on_table(model: Model, baseline: dict, retire: dict,
                        table: str) -> list:
     """A retired table that hosts objects the ledger does NOT cover (never
@@ -916,9 +994,12 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
             findings.extend(refresh_findings(name, fleet, model, policies))
             findings.extend(source_view_findings(name, fleet, model, ledger))
             if sync:
-                from .purge import purge_findings
+                from .purge import column_purge_findings, purge_findings
                 findings.extend(purge_findings(name, fleet, baseline, model,
                                                ledger))
+                findings.extend(column_purge_findings(name, fleet, findings))
+            from .selectors import findings as selector_findings
+            findings.extend(selector_findings(name, model))
         except DriftDoctorError as e:
             if errors is None:
                 raise

@@ -52,7 +52,8 @@ def aggregate(notices: list) -> list:
     de-duplicated and sorted."""
     by_key: dict = {}
     for n in notices:
-        if not isinstance(n, dict) or "table" not in n:
+        if not isinstance(n, dict) or "table" not in n \
+                or "template_view" not in n:
             continue
         key = (n["model"], n["table"])
         e = by_key.setdefault(key, {

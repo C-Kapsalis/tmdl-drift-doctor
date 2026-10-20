@@ -449,7 +449,7 @@ def apply_purge(fleet, f) -> tuple:
                 f"'{f.data['table']}'",
                 [FileChange(path, old, rewrite_rows_text(old, keep, arity,
                                                          path=path))])
-    if f.kind in ("purge.measure", "purge.column"):
+    if f.kind in ("purge.measure", "purge.column", "column.purge_listed"):
         keyword = "measure" if f.kind == "purge.measure" else "column"
         obj = f.data["measure" if keyword == "measure" else "column"]
         path = defn / "tables" / f"{f.data['table']}.tmdl"
@@ -458,6 +458,10 @@ def apply_purge(fleet, f) -> tuple:
         old = path.read_text(encoding="utf-8")
         new = te.remove_block(old, keyword, obj)
         if new is None:
+            if f.kind == "column.purge_listed":
+                from . import DriftDoctorError
+                raise DriftDoctorError(f"column {f.ref} is no longer in the "
+                                       f"model; re-run detect")
             return (f"{keyword} already removed", [])
         return (f"remove model-only {keyword} {f.ref}",
                 [FileChange(path, old, new)])
@@ -485,3 +489,33 @@ def apply_purge(fleet, f) -> tuple:
             changes.append(FileChange(mf, old, new))
         return (f"remove model-only table '{f.ref}'", changes)
     raise ValueError(f.kind)
+
+
+# ───────────────────────── configured column purge ─────────────────────────
+
+def column_purge_findings(name: str, fleet, findings: list) -> list:
+    """``column.purge_listed`` (sync mode): a model-only column on a shared
+    table whose name is on the configured purge list."""
+    conf = fleet.setting("column_purge") or {}
+    names = set(conf.get("names") or []) if isinstance(conf, dict) else set()
+    if not names:
+        return []
+    exceptions = set(conf.get("exceptions") or [])
+    from .fieldparams import fieldparam_files
+    fp = set(fieldparam_files(fleet, fleet.model_definition(name)))
+    out = []
+    for f in findings:
+        if f.model != name or f.kind != "extra.column":
+            continue
+        table, col = f.ref[:f.ref.rindex("[")], f.ref[f.ref.rindex("[") + 1:-1]
+        if col not in names or f.ref in exceptions or table in fp:
+            continue
+        out.append(_f("column.purge_listed", name, f.ref,
+                      f"column {f.ref} is on the configured purge list; "
+                      f"remove it, then clean the source view too",
+                      table=table, column=col,
+                      notices=[{"kind": "source_cleanup", "model": name,
+                                "table": table, "column": col,
+                                "message": f"{name}: drop column {col} from "
+                                           f"the source of '{table}'"}]))
+    return out

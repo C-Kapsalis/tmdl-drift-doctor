@@ -234,6 +234,26 @@
   the pruned references (float literals included) and listing what it
   cannot remove safely for manual review.
 
+- **Selector arms.** `fieldparam.dangling_selector` reports SWITCH arms that
+  call a measure the model lacks and removes those lines (batch-safe);
+  `drift-doctor add-branch` clones a sibling's arms for a new measure.
+- **Named measure removals.** `drift-doctor purge --measure` removes measures
+  from chosen models on any host table (blocked while anything calls them;
+  two hosts need `--table`); `drift-doctor retire OLD --new NEW` moves report
+  bindings and then deletes the superseded declaration (`--drop` deletes
+  only the declaration).
+- **`groups annotate`** writes one `Category_*` annotation per mapping group,
+  keeping existing human-written descriptions.
+- **`column.purge_listed`** (sync mode): configured bookkeeping columns on
+  shared tables are removed, with a source-cleanup notice.
+- **Opt-in deletes of model-only objects.** On a terminal, `remediate` offers
+  to delete an extra measure, column or relationship (one destructive
+  question, naming how many report references would break); batch runs and
+  `--yes` never do.
+- **Retirement channel.** A model measure whose core name matches a retired
+  measure is retired with it; protected names are never retired (blocked);
+  a revived object the model still carries is a digest line.
+
 ### Changed
 
 - **`measure.wrong_host` is one finding per measure.** A template measure

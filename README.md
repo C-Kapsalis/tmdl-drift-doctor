@@ -206,6 +206,8 @@ ledger. A retirement that derived work still depends on is refused: retire
 | `refresh_policy.client_only` | The model has a policy the template's table does not | Nothing: report-only | never remediated |
 | `retire.source_view` | The template re-pointed a table to a new source view (ledger) and the model still reads the old one | Rewrite the view in every spelling (bare or quoted helper call, inline query in the partition and the refresh policy together); a model on a declared view is retained, one on another view needs a person (both in the digest) | allowlist **+ `--sync`** |
 | `purge.fieldparam_entry` / `purge.measure` / `purge.column` / `purge.zmap_row` / `purge.relationship` / `purge.table` | Model-only content of an analysis category the model never customised (customised = it reads one of the category's tables through its own source view AND wires it to a table of its own) | Remove it; protected names, override retentions and data extensions are kept, and calls for a person go to the digest | allowlist **+ `--sync`** (`purge.enabled`), never under `--yes` |
+| `fieldparam.dangling_selector` | A selector SWITCH arm calls a measure the model does not have (the whole selector measure fails to process) | Remove the arm line (and a separator left before `)`) | allowlist |
+| `column.purge_listed` | A model-only column on the configured purge list | Remove the column; a source-cleanup notice follows | allowlist **+ `--sync`**, never under `--yes` |
 | `relationship.missing` | Template relationship (matched on `From[col] -> To[col]`, never on its GUID) absent | Append the template's raw block, once both endpoint columns exist | allowlist |
 | `relationship.modified` | Same endpoints, different cardinality, direction, or active flag | Overwrite with the template's block, keeping the derived block name | allowlist |
 | `relationship.extra` | Derived-only relationship between two shared tables | Nothing: advisory | never remediated |
@@ -344,6 +346,10 @@ than a clean `detect`:
 | `renames check` / `renames apply` | Checks that every `renames:` target exists in each model / rewrites references to the old names | 0 / 1 |
 | `remediate --ref NAME` | Pushes one template measure to every model where each hosts it (lineage tag kept, overrides honored); `--add-missing` inserts it where absent | 0 / 1 / 2 for an unknown name |
 | `enrichment rescan` / `enrichment report` | Checks that the view-enrichment registry still matches the models / renders it as a markdown table | 0, 5 on a stale entry |
+| `add-branch --measure M --sibling S` | Clones each SWITCH arm of S for M in the selector helper table (one line below each) | 0 / 1 when refused |
+| `purge --measure NAME` | Removes named measures from chosen models on whatever table hosts them; blocked while anything calls them | 0 / 1 |
+| `retire OLD --new NEW` / `--drop` | Moves report bindings from OLD to NEW, then removes OLD; refused while DAX still calls OLD | 0 |
+| `groups annotate` | Writes one `Category_*` annotation per mapping group, keeping human descriptions | 0 / 1 when no group is found |
 | `groups plan --drop G` | Read-only: which field groups and fact tables are exclusive to the dropped groups and which are shared (and by whom); dead fact tables | 0 / 2 |
 | `groups drop --drop G [--layer L] [--apply]` | Drops groups in dependency order: selector branches, measures, selector rows, annotation, gates, bookmarks, dead fact tables, mapping rows last; a dry run by default | 0 / 1 / 2 |
 | `groups drop-table --tables T [--apply]` | Removes a table everywhere: boolean sensors in other measures, relationships, registration, Q&A schema, report bindings, the file; anything else is listed for manual review | 0 / 1 |

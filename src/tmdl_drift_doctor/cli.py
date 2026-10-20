@@ -338,7 +338,8 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
     deletions_ok = sync and (confirm_deletions or (terminal and not assume_yes))
     kw = dict(kind=list(kinds), dry_run=dry_run, sync=sync, baseline=baseline,
               allow_destructive=deletions_ok or dry_run,
-              batch_only=assume_yes, backup=backup)
+              batch_only=assume_yes, backup=backup,
+              offer_extra_delete=terminal and not assume_yes)
     if not dry_run and not assume_yes:
         if terminal:
             answers = {"all": False, "quit": False}
@@ -1113,6 +1114,44 @@ def _verify(cmd, mdir):
         click.echo(f"    {line}")
 
 
+@groups_group.command("annotate")
+@_fleet_option
+@_target_options
+@click.option("--dry-run", is_flag=True, help="Report counts; write nothing.")
+def groups_annotate(fleet_path, model, all_models, path, dry_run) -> None:
+    """Mirror the mapping table's groups as model.tmdl annotations (one per
+    group; human-written descriptions are kept)."""
+    from . import groups as gp
+    fleet = _load(fleet_path)
+    c = gp.conf(fleet)
+    descriptions = c.get("descriptions") or {}
+    bad = False
+    for name, mdir in _group_targets(fleet, model, all_models, path):
+        defn = mdir / "definition"
+        groups = gp.mapping_groups(defn, c)
+        if groups is None:
+            click.echo(f"{name}: warning: the mapping table does not decode",
+                       err=True)
+            groups = []
+        if not groups:
+            click.echo(f"{name}: no groups found; model.tmdl untouched")
+            bad = True
+            continue
+        mf = defn / "model.tmdl"
+        old = mf.read_text(encoding="utf-8")
+        new, n = gp.annotate(old, groups, c["annotation_prefix"],
+                             descriptions)
+        click.echo(f"{name}: kept {n['kept']} added {n['added']} removed "
+                   f"{n['removed']} total {n['total']}"
+                   + (" (dry run)" if dry_run else ""))
+        if not dry_run and new != old:
+            from . import tmdl_edit as te
+            te.assert_tmdl_valid(new)
+            mf.write_text(new, encoding="utf-8")
+    if bad:
+        sys.exit(1)
+
+
 @groups_group.command("drop-table")
 @_fleet_option
 @_target_options
@@ -1149,6 +1188,148 @@ def groups_drop_table(fleet_path, model, all_models, path, tables,
                 click.echo(f"    manual review: {line}")
         click.echo("  applied" if apply else
                    "  dry run: nothing was written (use --apply)")
+
+
+# ───────────────────────────── selectors and named measures ─────────────────
+
+@main.command("add-branch")
+@_fleet_option
+@click.option("--measure", required=True, help="The new measure.")
+@click.option("--sibling", required=True,
+              help="The measure whose SWITCH arms are copied.")
+@click.option("--model", "models", multiple=True,
+              help="A fleet model (repeatable; default: every model with "
+                   "the helper file).")
+@click.option("--yes", "assume_yes", is_flag=True, help="Write the changes.")
+def add_branch_cmd(fleet_path, measure, sibling, models, assume_yes) -> None:
+    """Clone each SWITCH arm of --sibling for --measure in the selector
+    helper table, one new line right below each sibling arm."""
+    from .selectors import add_branch
+    fleet = _load(fleet_path)
+    helper = (fleet.setting("selector_branch") or {}).get(
+        "helper_file", "Helper Measures.tmdl")
+    names = list(models) or list(fleet.models)
+    inserted = refused = done = 0
+    for name in names:
+        if name not in fleet.models:
+            raise ConfigError(f"unknown model '{name}'")
+        path = fleet.model_definition(name) / "tables" / helper
+        if not path.is_file():
+            if models:
+                click.echo(f"{name}: no helper file {helper}")
+            continue
+        status, n = add_branch(path, measure, sibling, assume_yes)
+        click.echo(f"{name}: {status}")
+        done += 1
+        inserted += n
+        refused += status.startswith("REFUSED")
+    verb = "inserted" if assume_yes else "to insert"
+    click.echo(f"── {inserted} branch(es) {verb} in {done} model(s), "
+               f"{refused} refused")
+    if not assume_yes and inserted:
+        click.echo("dry run: run again with --yes to write")
+    if refused:
+        sys.exit(1)
+
+
+@main.command("purge")
+@_fleet_option
+@click.option("--measure", "measures", multiple=True, required=True,
+              help="A measure to remove (repeatable).")
+@click.option("--model", "model", default=None,
+              help="Comma-separated fleet models (or `template`).")
+@click.option("--all", "all_models", is_flag=True,
+              help="Every fleet model (never the template).")
+@click.option("--table", default=None,
+              help="The host table when a measure sits on several.")
+@click.option("--apply", "apply", is_flag=True, help="Remove (default: dry run).")
+@click.option("--yes", "assume_yes", is_flag=True,
+              help="Apply without a terminal (the names authorize it).")
+def purge_cmd(fleet_path, measures, model, all_models, table, apply,
+              assume_yes) -> None:
+    """Remove named measures from the chosen models, on whatever table
+    hosts them. Blocked while something else still calls the measure."""
+    from .interactive import ask, stdin_is_interactive
+    from .measure_ops import plan_purge
+    fleet = _load(fleet_path)
+    if all_models:
+        targets = list(fleet.models.items())
+    elif model:
+        targets = []
+        for n in model.split(","):
+            n = n.strip()
+            if n == "template":
+                targets.append(("template", fleet.template))
+            elif n in fleet.models:
+                targets.append((n, fleet.models[n]))
+            else:
+                raise ConfigError(f"unknown model '{n}'")
+    else:
+        raise ConfigError("name the models: --model NAME[,NAME] or --all")
+    bad = 0
+    removed = 0
+    for name, mdir in targets:
+        for m in measures:
+            item = plan_purge(name, mdir, m, table)
+            if item.status == "blocked":
+                bad += 1
+                click.echo(f"[BLOCKED] {name}: {m} — {item.reason}")
+                continue
+            if item.status == "skipped":
+                click.echo(f"[skipped] {name}: {m} — {item.reason}")
+                continue
+            if not apply:
+                click.echo(f"[would remove] {name}: {m} — {item.reason}")
+                click.echo(item.diff())
+                continue
+            ok = assume_yes or (stdin_is_interactive() and ask(
+                f"{name}: remove measure {m} ({item.reason})?"))
+            if not ok:
+                click.echo(f"[skipped] {name}: {m} — not confirmed")
+                continue
+            item.path.write_bytes(item.new.encode("utf-8"))
+            removed += 1
+            click.echo(f"[removed] {name}: {m} — {item.reason}")
+    click.echo(f"── removed={removed} blocked={bad}")
+    if bad:
+        sys.exit(1)
+
+
+@main.command("retire")
+@_fleet_option
+@click.argument("old")
+@click.option("--new", "new", default=None,
+              help="The measure that supersedes OLD (report bindings move "
+                   "to it).")
+@click.option("--drop", "drop", is_flag=True,
+              help="Delete OLD's declaration; leave report bindings.")
+@click.option("--skip-dir", "skip_dirs", multiple=True,
+              help="Top-level folders to leave out.")
+@click.option("--yes", "assume_yes", is_flag=True,
+              help="Apply (default: dry run).")
+def retire_cmd(fleet_path, old, new, drop, skip_dirs, assume_yes) -> None:
+    """Retire a superseded measure in the template and every model:
+    bindings move first, the declaration goes last; refused while DAX still
+    calls it."""
+    from .measure_ops import plan_retire
+    if bool(new) == bool(drop):
+        raise ConfigError("give exactly one of --new NEW or --drop")
+    fleet = _load(fleet_path)
+    affected = 0
+    for name, mdir in [("template", fleet.template)] + list(
+            fleet.models.items()):
+        try:
+            rel = Path(mdir).resolve().relative_to(fleet.root)
+            if rel.parts and rel.parts[0] in skip_dirs:
+                continue
+        except ValueError:
+            pass
+        res = plan_retire(name, mdir, old, None if drop else new, assume_yes)
+        if res is None:
+            continue
+        affected += 1
+        click.echo(f"{res.model}: {res.status} — {res.detail}")
+    click.echo(f"── {affected} model(s) affected")
 
 
 # ───────────────────────────── view enrichment ─────────────────────────────
