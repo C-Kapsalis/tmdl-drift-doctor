@@ -346,6 +346,11 @@
 
 ### Fixed
 
+- **A ledger line that is not an event object is refused.** The freshness
+  command reads two ledgers, and the ledger command reads one. A line that
+  holds valid JSON but is not an object — an array, a string, a number —
+  raised a Python error. Both now refuse such a line the way they refuse a
+  malformed one: exit 2, a message on standard error, no traceback.
 - **`diff` refuses a detection report it cannot read.** The two reports it
   compares are artifacts: they may be hand-edited, truncated by a pipeline or
   written by another version of the tool. A report whose models block, a

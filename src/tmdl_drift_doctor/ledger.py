@@ -124,6 +124,15 @@ class Ledger:
                     f"every read rather than risk mis-targeting one. Repair "
                     f"that line or restore the file from version control, "
                     f"then retry.") from e
+            if not isinstance(event, dict):
+                # Valid JSON, wrong shape: the line is not an event, so the
+                # ledger cannot be read. Refuse it like a malformed line.
+                raise DriftDoctorError(
+                    f"{self.path}:{i + 1}: the ledger line is a "
+                    f"{type(event).__name__}, not a ledger event object. The "
+                    f"ledger authorizes removals, so a line that is not an "
+                    f"event stops every read. Repair that line or restore "
+                    f"the file from version control, then retry.")
             _check_event(self.path, i + 1, event)
             out.append(event)
         return out

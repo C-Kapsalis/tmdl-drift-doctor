@@ -35,12 +35,21 @@ def _events(path) -> list:
         if not line.strip():
             continue
         try:
-            out.append(json.loads(line))
+            event = json.loads(line)
         except json.JSONDecodeError as exc:
             raise FreshnessError(
                 f"{p}:{i + 1}: malformed ledger line ({exc}). Repair that "
                 f"line or restore the file from version control, then "
                 f"retry.") from exc
+        if not isinstance(event, dict):
+            # Valid JSON, wrong shape: the line is not an event, so the
+            # ledger cannot be read. Refuse it like a malformed line.
+            raise FreshnessError(
+                f"{p}:{i + 1}: the ledger line is a "
+                f"{type(event).__name__}, not a ledger event object. Repair "
+                f"that line or restore the file from version control, then "
+                f"retry.")
+        out.append(event)
     return out
 
 
