@@ -19,7 +19,7 @@ def _defn(fleet_dir, model):
 
 def test_audit_clean_after_remediation(fleet_dir):
     _cli(fleet_dir, "capture")
-    _cli(fleet_dir, "remediate")
+    _cli(fleet_dir, "remediate", "--yes", "--kind", "table", "--kind", "column", "--kind", "measure", "--kind", "expression", "--kind", "mapping_row", "--kind", "relationship")
     r = _cli(fleet_dir, "audit")
     assert r.exit_code == 0, r.output
     assert "reverted=0" in r.output
@@ -27,7 +27,7 @@ def test_audit_clean_after_remediation(fleet_dir):
 
 def test_audit_catches_a_removed_addition(fleet_dir):
     _cli(fleet_dir, "capture")
-    _cli(fleet_dir, "remediate")
+    _cli(fleet_dir, "remediate", "--yes", "--kind", "table", "--kind", "column", "--kind", "measure", "--kind", "expression", "--kind", "mapping_row", "--kind", "relationship")
     mf = _defn(fleet_dir, "alpha") / "tables" / "Members.tmdl"
     mf.write_text(te.remove_block(mf.read_text(encoding="utf-8"), "measure",
                                   "New Members #"), encoding="utf-8")
@@ -41,7 +41,7 @@ def test_audit_catches_a_resurrected_retirement(fleet_dir):
     fleet = load_fleet(fleet_dir / "fleet.yml")
     saved = retire_everything_from_template(fleet)
     _cli(fleet_dir, "capture")
-    _cli(fleet_dir, "remediate", "--sync")
+    _cli(fleet_dir, "remediate", "--sync", "--confirm-deletions")
     assert _cli(fleet_dir, "audit").exit_code == 0
     vf = _defn(fleet_dir, "bravo") / "tables" / "Visits.tmdl"
     vf.write_text(te.insert_measure_block(vf.read_text(encoding="utf-8"),
@@ -57,7 +57,7 @@ def test_audit_treats_a_later_revival_as_superseded(fleet_dir):
     fleet = load_fleet(fleet_dir / "fleet.yml")
     saved = retire_everything_from_template(fleet)
     _cli(fleet_dir, "capture")
-    _cli(fleet_dir, "remediate", "--sync")
+    _cli(fleet_dir, "remediate", "--sync", "--confirm-deletions")
     vf = _defn(fleet_dir, "bravo") / "tables" / "Visits.tmdl"
     vf.write_text(te.insert_measure_block(vf.read_text(encoding="utf-8"),
                                           saved["measure_block"]),

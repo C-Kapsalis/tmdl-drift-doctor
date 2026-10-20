@@ -68,6 +68,9 @@ REMEDIABLE_KINDS = (
 ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra",
                   "measure.duplicate_host")
 
+# Kinds detection offers only in --sync mode (the purge channel).
+SYNC_ONLY_KINDS = ()
+
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
                             "retire.mapping_row", "retire.relationship")

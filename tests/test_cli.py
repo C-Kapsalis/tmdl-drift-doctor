@@ -32,7 +32,7 @@ def test_capture_then_detect_then_remediate(fleet_dir):
     assert r.exit_code == 0, r.output
     assert "would apply" in r.output and "---" in r.output  # diffs rendered
 
-    r = _invoke(fleet_dir, "remediate")
+    r = _invoke(fleet_dir, "remediate", "--yes", "--kind", "table", "--kind", "column", "--kind", "measure", "--kind", "expression", "--kind", "mapping_row", "--kind", "relationship")
     assert r.exit_code == 0, r.output
     assert "applied=" in r.output
 
@@ -112,7 +112,7 @@ def test_ledger_show_and_revive(fleet_dir):
 
 def test_remediate_converge_reports_passes(fleet_dir):
     _invoke(fleet_dir, "capture")
-    r = _invoke(fleet_dir, "remediate", "--converge")
+    r = _invoke(fleet_dir, "remediate", "--converge", "--yes", "--kind", "table", "--kind", "column", "--kind", "measure", "--kind", "expression", "--kind", "mapping_row", "--kind", "relationship")
     assert r.exit_code == 0, r.output
     assert "══ pass 1" in r.output and "converged" in r.output
     assert _invoke(fleet_dir, "detect").exit_code == 0

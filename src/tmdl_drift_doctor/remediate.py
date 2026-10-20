@@ -83,6 +83,8 @@ class Outcome:
 @dataclass
 class RunResult:
     outcomes: list = field(default_factory=list)
+    notices: list = field(default_factory=list)   # e.g. view-enrichment
+    digest: list = field(default_factory=list)    # decisions for a human
 
     def count(self, status: str) -> int:
         return sum(1 for o in self.outcomes if o.status == status)
@@ -475,6 +477,19 @@ class RunState:
     def invalidate(self, name: str) -> None:
         self._models.pop(name, None)
 
+    def divergent_tables(self, name: str) -> dict:
+        """{table: (template view, model view)} for the model's tables that
+        read a different source view than the template's."""
+        from .sources import identity, table_source_views
+        t_views = self.baseline.get("table_source_views") or {}
+        mine = table_source_views(self.model(name),
+                                  identity(self.fleet.raw))
+        out = {t: (t_views[t], v) for t, v in mine.items()
+               if t in t_views and t_views[t] != v}
+        for t in self.fleet.source_divergent.get(name, ()):
+            out.setdefault(t, (t_views.get(t), mine.get(t)))
+        return out
+
     def record(self, f: Finding) -> None:
         kind = f.kind
         b_tables = self.baseline.get("tables") or {}
@@ -648,104 +663,214 @@ def _phase(f: Finding) -> tuple:
 
 # ───────────────────────── engine ─────────────────────────
 
-def remediate(fleet: Fleet, findings: list, *, kind: Optional[str] = None,
+# Kinds a batch run (and `remediate --yes`) may apply without a person
+# answering: deterministic, additive or overwriting, never deleting.
+BATCH_SAFE_KINDS = (
+    "table.missing", "column.missing", "column.property_drift",
+    "measure.missing", "measure.expression_drift", "measure.property_drift",
+    "measure.wrong_host", "measure.renamed", "expression.drift",
+    "expression.missing", "mapping_row.missing", "mapping_category.missing",
+    "relationship.missing", "relationship.modified",
+    "relationship.casing_mismatch", "category_annotation.undeclared",
+    "fieldparam.blank_row", "fieldparam.cross_level",
+    "fieldparam.plot_specific_extra", "fieldparam.schema_modernize",
+    "fieldparam.row_missing", "retire.source_view",
+)
+
+# The field-parameter / mapping phase, in the order it is applied after the
+# structural phase (tables, measures, columns, relationships).
+DERIVED_PHASE_KINDS = (
+    "fieldparam.row_missing", "fieldparam.cross_level",
+    "fieldparam.plot_specific_extra", "fieldparam.blank_row",
+    "fieldparam.dangling_row", "fieldparam.schema_modernize",
+    "mapping_category.missing", "category_annotation.undeclared",
+)
+
+# Deletions: never applied in batch mode or under --yes; they need an
+# interactive yes, or --sync together with --confirm-deletions.
+DESTRUCTIVE_PREFIXES = ("retire.table", "retire.column", "retire.measure",
+                        "retire.mapping_row", "retire.mapping_category",
+                        "retire.relationship", "retire.stranded_ref",
+                        "purge.")
+
+
+def is_destructive(kind: str) -> bool:
+    return any(kind == p or kind.startswith(p if p.endswith(".") else p + ".")
+               or kind == p.rstrip(".") for p in DESTRUCTIVE_PREFIXES) \
+        or kind.startswith("purge.")
+
+
+def is_batch_safe(kind: str) -> bool:
+    return any(kind_matches(kind, k) for k in BATCH_SAFE_KINDS)
+
+
+def _sync_only(kind: str) -> bool:
+    from .detect import SYNC_ONLY_KINDS
+    return kind in SYNC_ONLY_KINDS
+
+
+def remediate(fleet: Fleet, findings: list, *, kind=None,
               dry_run: bool = False, sync: bool = False,
               ledger: Optional[Ledger] = None,
-              baseline: Optional[dict] = None) -> RunResult:
+              baseline: Optional[dict] = None,
+              confirm: Optional[Callable] = None,
+              batch_only: bool = False,
+              allow_destructive: bool = True) -> RunResult:
+    """Apply every admitted finding. The Python API is the batch engine: it
+    applies what the gates admit without asking. The CLI passes
+    `confirm(finding, label, changes) -> (ok, reason)` for the interactive
+    walk, `batch_only` for --yes (batch-safe kinds only) and
+    `allow_destructive=False` unless deletions were confirmed."""
     ledger = ledger or Ledger(fleet.ledger_path)
     if baseline is None:
         from .baseline import load_baseline
         baseline = load_baseline(fleet)
+    kinds = [kind] if isinstance(kind, str) else list(kind or [])
     state = RunState(fleet, baseline)
     result = RunResult()
 
+    def out(f, status, reason="", changes=None):
+        result.outcomes.append(Outcome(f, status, reason, changes or []))
+
     for f in sorted(findings, key=_phase):
-        if kind and not kind_matches(f.kind, kind):
+        if kinds and not any(kind_matches(f.kind, k) for k in kinds):
             continue
         if f.overridden:
             o = f.override
-            result.outcomes.append(Outcome(
-                f, "overridden",
+            out(f, "overridden",
                 f"acknowledged by a fleet.yml override ({o.kind}): {o.reason}"
-                f" [owner {o.owner or '?'}, added {o.added or '?'}]"))
+                f" [owner {o.owner or '?'}, added {o.added or '?'}]")
             continue
         if f.advisory:
-            result.outcomes.append(Outcome(
-                f, "skipped",
+            out(f, "skipped",
                 "advisory — this object exists only in the derived model; "
                 "extensions are reported for review, never auto-remediated. "
-                "Edit the derived model directly if it is unwanted."))
+                "Edit the derived model directly if it is unwanted.")
             continue
         if f.kind not in APPLIERS:
-            result.outcomes.append(Outcome(
-                f, "skipped",
+            out(f, "manual",
                 f"kind '{f.kind}' has no automated fix — resolve it by "
-                f"editing the model directly"))
+                f"editing the model directly")
             continue
         if not fleet.allows(f.kind):
-            result.outcomes.append(Outcome(
-                f, "skipped",
+            out(f, "skipped",
                 f"kind '{f.kind}' is not in the fleet allowlist — nothing "
                 f"cascades by default. Add it under allowlist.kinds in "
-                f"fleet.yml to let remediate apply it."))
+                f"fleet.yml to let remediate apply it.")
             continue
-        if f.kind in RETIREMENT_FINDING_KINDS and not sync:
-            result.outcomes.append(Outcome(
-                f, "skipped",
-                "retirement removals require --sync (deletions never run in "
-                "a default pass) — re-run with --sync to apply this removal"))
+        if (f.kind in RETIREMENT_FINDING_KINDS or _sync_only(f.kind)) \
+                and not sync:
+            out(f, "skipped",
+                "retirement and purge items require --sync (they never run "
+                "in a default pass) — re-run with --sync to apply this")
             continue
         if f.blocked:
-            result.outcomes.append(Outcome(
-                f, "blocked",
+            out(f, "blocked",
                 "derived work depends on it: " + "; ".join(f.blocked)
                 + ". Decide by hand: remove or rewrite the dependent, or "
                   "keep the object with a `retain` override or a ledger "
-                  "revival."))
+                  "revival.")
+            continue
+        if is_destructive(f.kind) and not allow_destructive:
+            out(f, "skipped_destructive",
+                "destructive: deletions are never applied under --yes or in "
+                "batch mode; answer interactively, or pass --sync with "
+                "--confirm-deletions")
+            continue
+        if batch_only and not is_batch_safe(f.kind):
+            out(f, "skipped",
+                f"kind '{f.kind}' is not batch-safe: it needs an interactive "
+                f"answer")
+            continue
+        guard = _divergent_guard(fleet, state, f)
+        if guard:
+            out(f, "skipped_divergent", guard)
+            continue
+        late = _late_override(fleet, f)
+        if late is not None:
+            out(f, "skipped_override",
+                f"acknowledged by a fleet.yml override ({late.kind}): "
+                f"{late.reason} (re-checked at apply time)")
             continue
 
         try:
             pre = PRECONDITIONS.get(f.kind)
             reason = pre(state, f) if pre else None
             if reason:
-                result.outcomes.append(Outcome(f, "auto_skipped_precondition",
-                                               reason))
+                out(f, "auto_skipped_precondition", reason)
                 continue
             try:
                 label, changes = APPLIERS[f.kind](fleet, f)
             except _Skip as skip:
-                result.outcomes.append(Outcome(f, "skipped", str(skip)))
+                out(f, "skipped", str(skip))
                 continue
             exempt = _exempt_change(fleet, f, changes)
             if exempt is not None:
-                result.outcomes.append(Outcome(
-                    f, "overridden",
+                out(f, "overridden",
                     f"{exempt.path} is exempt from the template cascade "
-                    f"(overrides.files): {exempt.reason}"))
+                    f"(overrides.files): {exempt.reason}")
                 continue
             for c in changes:
                 if c.new is not None and c.path.suffix == ".tmdl":
                     te.assert_tmdl_valid(c.new)   # guard BEFORE any write
             if dry_run:
                 state.record(f)
-                result.outcomes.append(Outcome(f, "would-apply", label, changes))
+                out(f, "would-apply", label, changes)
                 continue
+            if confirm is not None:
+                ok, why = confirm(f, label, changes)
+                if not ok:
+                    out(f, "skipped", why)
+                    continue
             for c in changes:   # in order: a move writes its destination first
                 if c.new is None:
-                    c.path.unlink()
+                    if c.path.is_dir():
+                        import shutil
+                        shutil.rmtree(c.path)
+                    elif c.path.exists():
+                        c.path.unlink()
                 else:
                     c.path.parent.mkdir(parents=True, exist_ok=True)
                     c.path.write_text(c.new, encoding="utf-8")
             state.invalidate(f.model)
             state.record(f)
-            ledger.record_remediation(
-                f.kind, f.model, f.ref, label,
-                files=[str(c.path) for c in changes])
-            result.outcomes.append(Outcome(f, "applied", label, changes))
+            if changes:
+                ledger.record_remediation(
+                    f.kind, f.model, f.ref, label,
+                    files=[str(c.path) for c in changes])
+            out(f, "applied", label, changes)
+            for notice in _notices(fleet, f):
+                result.notices.append(notice)
         except (DriftDoctorError, TmdlEditError, OSError) as e:
-            result.outcomes.append(Outcome(f, "failed", str(e)))
+            out(f, "failed", str(e))
 
     return result
+
+
+def _divergent_guard(fleet: Fleet, state, f: Finding) -> str:
+    """A modified relationship whose endpoint table reads a different
+    source view than the template's is left alone in batch mode."""
+    if f.kind != "relationship.modified":
+        return ""
+    divergent = state.divergent_tables(f.model)
+    ft, _fc, tt, _tc = parse_signature(f.ref)
+    hit = [t for t in (ft, tt) if t in divergent]
+    if hit:
+        return (f"endpoint table(s) {', '.join(hit)} read a different source "
+                f"view than the template's; a relationship on a "
+                f"source-divergent table is decided by hand")
+    return ""
+
+
+def _late_override(fleet: Fleet, f: Finding):
+    """Re-check overrides at apply time: a finding carried over from an
+    earlier detect must still never write a declared divergence."""
+    from .overrides import match_override
+    return match_override(fleet, f) if f.model in fleet.models else None
+
+
+def _notices(fleet: Fleet, f: Finding) -> list:
+    return list((f.data or {}).get("notices") or [])
 
 
 @dataclass

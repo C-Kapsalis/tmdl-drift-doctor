@@ -68,8 +68,30 @@
   col_drift,rel_drift`).
 - **`detect --json` findings carry `remediable` and `data`.**
 
+- **`remediate --yes`, `--interactive` and `--confirm-deletions`.** On a
+  terminal every fix is confirmed (`y`/`n`, `a` = yes to the rest, `q` =
+  stop). `--yes` applies without asking but only batch-safe kinds and only
+  together with at least one `--kind`. `--sync --confirm-deletions` is the
+  explicit second confirmation that lets deletions run in a scheduled job.
+  `--kind` may be repeated.
+- **`tmdl_drift_doctor.interactive`** exposes the confirmation runner
+  (`run_interactive`, `ask`, `Item`, `Action`); `remediate.BATCH_SAFE_KINDS`
+  and `remediate.DERIVED_PHASE_KINDS` list the batch-safe kinds and the
+  order of the field-parameter phase.
+- **More remediation outcomes.** `manual` (no automated fix),
+  `skipped_override` (an override found at apply time, so a stale finding
+  never writes a declared divergence), `skipped_divergent` (a modified
+  relationship on a source-divergent table) and `skipped_destructive`.
+
 ### Changed
 
+- **`remediate` without a terminal applies nothing (breaking).** When
+  stdin is not a terminal, questions are disabled, every item is reported
+  as skipped ("non-interactive") and nothing is written, unless `--yes` is
+  given with at least one `--kind`. Deletions (`retire.*` removals, purges)
+  are never applied under `--yes`: they need an interactive yes or `--sync
+  --confirm-deletions`. CI jobs that ran a bare `remediate` must add `--yes
+  --kind ...`.
 - **Configuration errors exit 2 (breaking).** A malformed or unresolvable
   `fleet.yml`, and an unknown `--model`, now exit 2 instead of 1, so CI can
   tell a broken configuration from drift.

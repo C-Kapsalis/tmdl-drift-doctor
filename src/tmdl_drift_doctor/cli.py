@@ -33,6 +33,7 @@ from .detect import build_report, detect_fleet, is_actionable, is_gating
 from .fleet import load_fleet
 from .ledger import RETIREMENT_KINDS, Ledger
 from .overrides import format_ack
+from .remediate import is_destructive
 from .remediate import remediate as run_remediate
 from .remediate import remediate_converge
 
@@ -230,28 +231,86 @@ def _print_findings(fleet, findings, errors, model_filter, kind_filter):
 
 @main.command()
 @_fleet_option
-@click.option("--kind", default=None,
-              help="Only remediate findings whose kind starts with this prefix.")
+@click.option("--kind", "kinds", multiple=True,
+              help="Only findings of this kind (dotted prefix: `measure` "
+                   "covers every measure.* kind). Repeatable; intersects "
+                   "allowlist.kinds.")
 @click.option("--dry-run", is_flag=True,
               help="Compute every edit and print unified diffs; write nothing "
                    "(not even the ledger).")
 @click.option("--sync", is_flag=True,
-              help="Also apply retire.* removals (deletions of provably "
-                   "ex-template objects). Never on by default.")
+              help="Also offer retire.* and purge items (deletions of provably "
+                   "ex-template or uncustomised objects). Never on by default.")
 @click.option("--converge", is_flag=True,
               help="Re-detect and re-apply until a pass changes nothing "
                    "(at most 4 passes).")
 @click.option("--model", "model_filter", default=None,
               help="Only this derived model.")
+@click.option("--yes", "assume_yes", is_flag=True,
+              help="Apply without asking, but only batch-safe kinds, and only "
+                   "with at least one --kind. Never deletes anything.")
+@click.option("--interactive", is_flag=True,
+              help="Ask before every fix (the default on a terminal).")
+@click.option("--confirm-deletions", is_flag=True,
+              help="With --sync: the explicit second confirmation that lets "
+                   "deletions run without a terminal (for scheduled jobs).")
 @click.option("--allow-stale", is_flag=True,
               help="Proceed on a stale baseline (misclassification risk).")
-def remediate(fleet_path, kind, dry_run, sync, converge, model_filter,
-              allow_stale) -> None:
-    """Cascade template truth into the derived models (allowlist-gated)."""
+def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
+              assume_yes, interactive, confirm_deletions, allow_stale) -> None:
+    """Cascade template truth into the derived models (allowlist-gated).
+
+    On a terminal every fix is confirmed (y/n, a = yes to the rest, q =
+    stop). Without a terminal nothing is applied unless --yes is given with
+    at least one --kind, and even then deletions are never applied: they
+    need an interactive yes, or --sync with --confirm-deletions."""
+    from .interactive import Quit, ask, stdin_is_interactive
+    if assume_yes and not kinds:
+        click.echo("ERROR: --yes requires an explicit --kind (it never "
+                   "applies every kind at once)", err=True)
+        sys.exit(USAGE_EXIT)
+    if confirm_deletions and not sync:
+        click.echo("ERROR: --confirm-deletions only makes sense with --sync",
+                   err=True)
+        sys.exit(USAGE_EXIT)
     fleet = _load(fleet_path)
     baseline = _fresh_baseline(fleet, allow_stale)
     detect_once = lambda: _detect(fleet, baseline, model_filter=model_filter)
-    kw = dict(kind=kind, dry_run=dry_run, sync=sync, baseline=baseline)
+
+    terminal = stdin_is_interactive()
+    deletions_ok = sync and (confirm_deletions or (terminal and not assume_yes))
+    kw = dict(kind=list(kinds), dry_run=dry_run, sync=sync, baseline=baseline,
+              allow_destructive=deletions_ok or dry_run,
+              batch_only=assume_yes)
+    if not dry_run and not assume_yes:
+        if terminal:
+            answers = {"all": False, "quit": False}
+
+            def confirm(f, label, changes):
+                if answers["quit"]:
+                    return False, "stopped (q)"
+                if answers["all"] and not is_destructive(f.kind):
+                    return True, ""
+                try:
+                    answer = ask(f"{f.model}: {f.kind} {f.ref} — {label}. "
+                                 f"Apply?", allow_all=True)
+                except Quit:
+                    answers["quit"] = True
+                    return False, "stopped (q)"
+                if answer == "all":
+                    answers["all"] = True
+                return bool(answer), "declined"
+        else:
+            click.echo("note: stdin is not a terminal, so questions are "
+                       "disabled and every item is treated as 'no' "
+                       "(non-interactive). Pass --yes with --kind to apply "
+                       "batch-safe kinds.")
+
+            def confirm(f, label, changes):
+                if is_destructive(f.kind) and deletions_ok:
+                    return True, ""
+                return False, "non-interactive: not applied without --yes"
+        kw["confirm"] = confirm
     if converge:
         results = remediate_converge(fleet, detect_once, **kw)
     else:
@@ -292,17 +351,25 @@ def _print_outcomes(result, dry_run):
         elif o.status == "auto_skipped_precondition":
             click.echo(f"[precondition] {f.model}: {f.kind} {f.ref} — "
                        f"{o.reason}")
-        elif o.status == "overridden":
+        elif o.status in ("overridden", "skipped_override"):
             click.echo(f"[ACK] {f.model}: {f.kind} {f.ref} — {o.reason}")
+        elif o.status == "manual":
+            click.echo(f"[manual] {f.model}: {f.kind} {f.ref} — {o.reason}")
         else:
             click.echo(f"[skipped] {f.model}: {f.kind} {f.ref} — {o.reason}")
+    for notice in result.notices:
+        click.echo(f"[notice] {notice.get('message') if isinstance(notice, dict) else notice}")
     click.echo(f"\n── summary: applied={result.count('applied')} "
                f"would-apply={result.count('would-apply')} "
                f"skipped={result.count('skipped')} "
+               f"manual={result.count('manual')} "
                f"blocked={result.count('blocked')} "
                f"auto_skipped_precondition="
                f"{result.count('auto_skipped_precondition')} "
                f"overridden={result.count('overridden')} "
+               f"skipped_override={result.count('skipped_override')} "
+               f"skipped_divergent={result.count('skipped_divergent')} "
+               f"skipped_destructive={result.count('skipped_destructive')} "
                f"failed={result.count('failed')}")
 
 

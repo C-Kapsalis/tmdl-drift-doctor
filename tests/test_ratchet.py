@@ -58,7 +58,7 @@ def test_a_rise_fails_and_tighten_never_raises(fleet_dir):
 
 def test_tighten_lowers_after_remediation(fleet_dir):
     _seeded(fleet_dir)
-    _cli(fleet_dir, "remediate", "--kind", "measure.")
+    _cli(fleet_dir, "remediate", "--yes", "--kind", "measure.")
     r = _cli(fleet_dir, "ratchet", "check")
     assert r.exit_code == 0 and "[improved] alpha" in r.output
     _cli(fleet_dir, "ratchet", "tighten")
