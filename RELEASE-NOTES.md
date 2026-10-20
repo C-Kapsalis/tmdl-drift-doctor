@@ -37,6 +37,24 @@
   touch keep their entries verbatim, so a one-model run never re-attests the
   rest of the fleet. A run that applied nothing leaves the file
   byte-identical.
+- **`drift-doctor diff`.** Compares two `detect --json` reports and writes
+  a Markdown report of the blast radius: the objects the change adds to
+  the fleet's drift and the ones it resolves, how far each reaches, and
+  what it means per model (added, removed, net, and a per-kind-head
+  breakdown). The report is written for a CI comment: a hidden marker line
+  comes first, so a later run edits the same comment in place, and the
+  footer names the two reports it compared. A scoped or kind-filtered
+  report, and a fleet whose committed baseline no longer matches the live
+  template, each raise a warning in the report; neither fails the run.
+- **`drift-doctor freshness`.** Warns that a branch predates retirements
+  the main line has made, by comparing the ledger the branch was cut from
+  with the ledger on the main line. A retirement that is still present in
+  a derived model is reported as at risk, with the models that still carry
+  it; a kind the tool cannot check is listed as not checked rather than
+  guessed. Advisory by construction: the command always exits 0, because
+  the ratchet is the blocking gate. `--body-file` writes a Markdown body
+  for a CI comment and `--stale-flag-file` writes `1` when something is at
+  risk.
 - **`expression.missing`.** Every expression the template declares and a
   model does not is reported, whether or not the name is listed under
   `allowlist.expressions` (that list only scopes content comparison).

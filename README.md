@@ -356,6 +356,8 @@ than a clean `detect`:
 | `mapping decode` / `mapping diff` / `mapping union` | Prints an encoded mapping table's rows per category / compares two tables' categories / writes the template rows plus the derived-only rows into a table | 0 / 2 on bad input |
 | `fieldparam retag --from A --to B --display D FILES` | Moves the named live field-parameter rows from category A to B (only the category literal changes); nothing is written unless every row is found | 0 / 1 |
 | `review --out REVIEW.md` | Writes a per-model checklist of everything routed to a human: blocked retirements, precondition skips, wrong or duplicate hosts, advisories, overrides in force | 0 |
+| `diff --base B --head H --out FILE.md` | Compares two `detect --json` reports and writes the blast radius: what the change adds to the fleet's drift, what it resolves, how far each object reaches, per model. Written for a CI comment (a hidden marker line comes first) | 0, or 2 when a report cannot be read |
+| `freshness --base-ledger FILE` | Warns that a branch predates retirements the main line has made, and names the derived models that still carry them. Advisory: the ratchet is the gate | 0 always |
 
 Keep `remediate` on a maintainer's machine where the diffs get reviewed and
 committed; if you want automated fix-up PRs, post the `--dry-run` diff for

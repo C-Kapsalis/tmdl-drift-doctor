@@ -8,6 +8,8 @@
     drift-doctor review    --fleet fleet.yml [--out REVIEW.md]
     drift-doctor ledger    --fleet fleet.yml [--json]
     drift-doctor ledger    --fleet fleet.yml --revive REF --kind KIND [--model NAME]
+    drift-doctor diff      --base BASE.json --head HEAD.json --out FILE.md [--fleet fleet.yml]
+    drift-doctor freshness --fleet fleet.yml --base-ledger FILE [--head-ledger FILE]
 
     drift-doctor fleet     check|connection|family --fleet fleet.yml
     drift-doctor overrides check|files|is-exempt --fleet fleet.yml
@@ -1458,6 +1460,93 @@ def enrichment_report(fleet_path, fmt, registry) -> None:
                               ensure_ascii=False))
     else:
         click.echo(markdown(entries), nl=False)
+
+
+# ───────────────────────────── blast radius and freshness ─────────────────────────────
+
+@main.command("diff")
+@click.option("--base", "base_path", required=True,
+              type=click.Path(exists=True, dir_okay=False),
+              help="A `detect --json` report from before the change.")
+@click.option("--head", "head_path", required=True,
+              type=click.Path(exists=True, dir_okay=False),
+              help="A `detect --json` report from after the change.")
+@click.option("--out", "out_path", required=True,
+              type=click.Path(dir_okay=False),
+              help="Where to write the Markdown report.")
+@click.option("--fleet", "fleet_path", type=click.Path(dir_okay=False),
+              default=None,
+              help="The fleet file, to warn when the committed baseline no "
+                   "longer matches the live template.")
+def diff_cmd(base_path, head_path, out_path, fleet_path) -> None:
+    """Compare two detection reports and write what the change reaches.
+
+    The report names the objects the change adds to the fleet's drift and
+    the ones it resolves, how far each reaches, and what it means per
+    model. It is written for a CI comment (a hidden marker line comes
+    first, so a later run edits the same comment in place).
+    """
+    from .blast import DiffError, write_diff
+    fleet = None
+    if fleet_path:
+        fleet = _load(fleet_path)
+    try:
+        res = write_diff(base_path, head_path, out_path, fleet=fleet)
+    except DiffError as e:
+        raise ConfigError(str(e)) from e
+    click.echo(f"blast radius written: {res['path']}")
+    click.echo(f"{res['lines']} line(s); {res['objects']} of {res['models']} "
+               f"model(s) changed")
+    if res["stale"]:
+        click.echo("warning: the committed baseline no longer matches the "
+                   "live template")
+
+
+@main.command("freshness")
+@_fleet_option
+@click.option("--base-ledger", "base_ledger", required=True,
+              type=click.Path(exists=True, dir_okay=False),
+              help="The ledger as it was at the merge base.")
+@click.option("--head-ledger", "head_ledger", default=None,
+              type=click.Path(exists=True, dir_okay=False),
+              help="The ledger at the tip of the main line (default: the "
+                   "fleet's own ledger).")
+@click.option("--base-label", "base_label", default="",
+              help="A label for the base, shown in the report.")
+@click.option("--body-file", "body_file", default=None,
+              type=click.Path(dir_okay=False),
+              help="Write a Markdown body for a CI comment.")
+@click.option("--stale-flag-file", "stale_flag_file", default=None,
+              type=click.Path(dir_okay=False),
+              help="Write `1` when something is at risk, an empty file "
+               "otherwise.")
+def freshness_cmd(fleet_path, base_ledger, head_ledger, base_label,
+                   body_file, stale_flag_file) -> None:
+    """Warn that a branch predates retirements the main line has made.
+
+    Advisory by construction: the ratchet is the gate. The command exits 0
+    whatever it finds.
+    """
+    from .freshness import FreshnessError, run
+    fleet = _load(fleet_path)
+    try:
+        res = run(fleet, base_ledger, head_ledger, base_label=base_label,
+                  body_file=body_file, stale_flag_file=stale_flag_file)
+    except FreshnessError as e:
+        raise ConfigError(str(e)) from e
+    click.echo(f"base ledger: {res['base']} retirement(s) in force")
+    click.echo(f"head ledger: {res['head']} retirement(s) in force")
+    click.echo(f"unseen: {len(res['unseen'])} entr"
+               f"{'y' if len(res['unseen']) == 1 else 'ies'}")
+    for (kind, ref), models in res["at_risk"]:
+        click.echo(f"at risk: {kind} {ref} in {', '.join(models)}")
+    if res["unseen"] and not res["at_risk"]:
+        click.echo("nothing at risk: none of the unseen retirements is "
+                   "present in a derived model")
+    for kind, ref in res["not_checked"]:
+        click.echo(f"not checked: {kind} {ref}")
+    if body_file:
+        click.echo(f"body written: {body_file}")
 
 
 # ───────────────────────────── encoded mapping tables ─────────────────────────────
