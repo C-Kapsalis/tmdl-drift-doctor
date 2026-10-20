@@ -220,6 +220,20 @@
 - **`detect` works before the first capture**, comparing against the live
   template without writing anything (a note says so).
 
+- **Analysis groups.** `drift-doctor groups plan` builds the graph of
+  groups, field groups, selector measures and the fact tables they read, and
+  splits a drop set's objects into exclusive (safe to remove) and shared
+  (kept, naming the survivors); dead fact tables (no data reference, only
+  sensor calls) are always listed. `groups drop` runs the layers in
+  dependency order (selector-branch lines, the measure purge with its
+  liveness rules, selector rows, the model annotation, gate measures and
+  their aggregate branches, pinned bookmarks, dead fact tables re-derived
+  after the purge, mapping rows last), each available alone with `--layer`
+  and a dry run unless `--apply`. `groups drop-table` removes a table from
+  every surface it occupies, keeping report JSON byte-identical apart from
+  the pruned references (float literals included) and listing what it
+  cannot remove safely for manual review.
+
 ### Changed
 
 - **`measure.wrong_host` is one finding per measure.** A template measure

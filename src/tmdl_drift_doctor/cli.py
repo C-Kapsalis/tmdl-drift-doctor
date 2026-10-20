@@ -895,6 +895,262 @@ def renames_apply(fleet_path, model_filter, dry_run, assume_yes) -> None:
         sys.exit(1)
 
 
+# ───────────────────────────── analysis groups ─────────────────────────────
+
+@main.group("groups")
+def groups_group() -> None:
+    """Plan and drop analysis groups (subject areas) safely."""
+
+
+def _group_targets(fleet, model, all_models, path):
+    """[(name, model dir)] for --model / --all / --path."""
+    if path:
+        p = Path(path)
+        if not (p / "definition").is_dir():
+            raise ConfigError(f"{path} is not a *.SemanticModel folder")
+        return [(p.name, p)]
+    if all_models:
+        return list(fleet.models.items())
+    if not model:
+        raise ConfigError("name a target: --model NAME, --all or --path DIR")
+    if model == "template":
+        return [("template", fleet.template)]
+    if model not in fleet.models:
+        click.echo(f"unknown model '{model}'; fleet.yml defines: "
+                   f"{', '.join(fleet.models)}", err=True)
+        sys.exit(USAGE_EXIT)
+    return [(model, fleet.models[model])]
+
+
+def _target_options(fn):
+    fn = click.option("--path", "path", default=None,
+                      help="An explicit *.SemanticModel folder.")(fn)
+    fn = click.option("--all", "all_models", is_flag=True,
+                      help="Every model in fleet.yml.")(fn)
+    fn = click.option("--model", "model", default=None,
+                      help="A fleet model, or `template`.")(fn)
+    return fn
+
+
+@groups_group.command("plan")
+@_fleet_option
+@_target_options
+@click.option("--drop", "drop", multiple=True, required=True,
+              help="A group to drop (repeatable).")
+@click.option("--json", "json_out", default=None, metavar="FILE",
+              help="Also write the plans as JSON.")
+def groups_plan(fleet_path, model, all_models, path, drop, json_out) -> None:
+    """Read-only: which field groups and fact tables are exclusive to the
+    dropped groups (safe to remove) and which are shared (kept)."""
+    from .groups import build_graph, make_plan
+    fleet = _load(fleet_path)
+    plans = {}
+    for name, mdir in _group_targets(fleet, model, all_models, path):
+        click.echo(f"== {name} ({mdir})")
+        graph = build_graph(fleet, mdir / "definition")
+        if graph is None:
+            click.echo("  SKIP: no mapping table")
+            continue
+        plan = make_plan(graph, drop)
+        plans[name] = dict(plan, path=str(mdir))
+        _echo_plan(plan)
+    if json_out:
+        Path(json_out).write_text(json.dumps(plans, indent=2, sort_keys=True,
+                                             ensure_ascii=False) + "\n",
+                                  encoding="utf-8")
+
+
+def _echo_plan(plan):
+    if plan["absent"]:
+        click.echo(f"  not in this model: {', '.join(plan['absent'])}")
+    dead = plan["dead_fact_tables"]
+    if dead:
+        click.echo("  dead fact tables (sensor references): " + ", ".join(
+            f"{t} ({n})" for t, n in dead.items()))
+    if not plan["present"]:
+        click.echo("  none of the requested groups exists in this model")
+        return
+    ex, sh = plan["exclusive"], plan["shared"]
+    click.echo(f"  exclusive field groups ({len(ex['field_groups'])}): "
+               f"{', '.join(ex['field_groups']) or '-'}")
+    for fg, keep in sh["field_groups"].items():
+        click.echo(f"  shared field group {fg}: kept by {', '.join(keep)}")
+    click.echo(f"  exclusive fact tables ({len(ex['fact_tables'])}): "
+               f"{', '.join(ex['fact_tables']) or '-'}")
+    for t, keep in sh["fact_tables"].items():
+        click.echo(f"  shared fact table {t}: kept by {', '.join(keep)}")
+
+
+LAYERS = ("selector-branches", "measures", "selectors", "annotation",
+          "gates", "bookmarks", "tables", "mapping")
+
+
+@groups_group.command("drop")
+@_fleet_option
+@_target_options
+@click.option("--drop", "drop", multiple=True, required=True,
+              help="A group to drop (repeatable).")
+@click.option("--layer", "layers", multiple=True,
+              type=click.Choice(LAYERS),
+              help="Run only these layers (default: all, in dependency "
+                   "order).")
+@click.option("--apply", "apply", is_flag=True,
+              help="Write the changes (default: dry run).")
+@click.option("--verify", is_flag=True,
+              help="After --apply, run the verification command per model.")
+@click.option("--verify-cmd", default="tmdl-preflight check {model}",
+              show_default=True, help="The verification command.")
+def groups_drop(fleet_path, model, all_models, path, drop, layers, apply,
+                verify, verify_cmd) -> None:
+    """Drop groups end to end: selector branches, measures, selector rows,
+    annotation, gates, bookmarks, dead tables, then mapping rows LAST."""
+    from . import groups as gp
+    fleet = _load(fleet_path)
+    chosen = [l for l in LAYERS if not layers or l in layers]
+    for name, mdir in _group_targets(fleet, model, all_models, path):
+        defn = mdir / "definition"
+        click.echo(f"== {name} ({mdir})")
+        graph = gp.build_graph(fleet, defn)
+        if graph is None:
+            click.echo("  SKIP: no mapping table")
+            continue
+        plan = gp.make_plan(graph, drop)
+        if plan["absent"]:
+            click.echo(f"  not in this model: {', '.join(plan['absent'])}")
+        c = gp.conf(fleet)
+        try:
+            summary = _run_layers(fleet, gp, c, mdir, graph, plan, drop,
+                                  chosen, apply)
+        except (DriftDoctorError, TmdlEditError) as e:
+            click.echo(f"  ERROR: {e}", err=True)
+            sys.exit(1)
+        for line in summary:
+            click.echo("  " + line)
+        if apply:
+            click.echo("  applied; commit this model's changes on their own")
+            if verify:
+                _verify(verify_cmd, mdir)
+        else:
+            click.echo("  dry run: nothing was written (use --apply)")
+
+
+def _run_layers(fleet, gp, c, mdir, graph, plan, drop, chosen, apply):
+    defn = mdir / "definition"
+    present = bool(plan["present"])
+    out = []
+
+    def run(layer_fn):
+        changes = []
+        res = layer_fn(changes)
+        if apply and changes:
+            gp.write_changes(changes)
+        return res
+
+    if not present:
+        out.append("nothing to drop in this model")
+    exclusive = plan["exclusive"]["field_groups"]
+    purge_preview = []
+    if present and "selector-branches" in chosen:
+        ms = gp.dropped_axis_measures(defn, c, exclusive)
+        r = run(lambda ch: gp.layer_selector_branches(defn, c, ms, ch))
+        out.append(f"selector branch lines removed: {r['lines_removed']}")
+    if present and "measures" in chosen:
+        r = run(lambda ch: gp.layer_measures(fleet, defn, graph, drop, ch))
+        purge_preview = r["purge"]
+        out.append(f"measures purged: {', '.join(r['purge']) or '-'}; kept "
+                   f"live: {', '.join(r['kept']) or '-'}")
+    if present and "selectors" in chosen:
+        r = run(lambda ch: gp.layer_selector_rows(defn, c, exclusive, ch))
+        out.append(f"selector rows removed: {r['rows_removed']} (exclusive "
+                   f"field groups: {', '.join(r['exclusive']) or '-'})")
+    if present and "annotation" in chosen:
+        r = run(lambda ch: gp.layer_annotation(defn, c, drop, ch))
+        out.append("annotation keys removed: " + (", ".join(r.get("keys")
+                                                            or []) or
+               "none (a template-wide group has no annotation)"))
+    if present and "gates" in chosen:
+        r = run(lambda ch: gp.layer_gates(defn, fleet, drop, ch))
+        out.append(f"gate measures removed: "
+                   f"{', '.join(r['gates_removed']) or '-'}; aggregate lines: "
+                   f"{sum(r['aggregate_lines'].values())}")
+    if present and "bookmarks" in chosen:
+        r = run(lambda ch: gp.layer_bookmarks(mdir, fleet, c, drop, ch))
+        out.append(f"bookmarks deleted: "
+                   f"{', '.join(b['display_name'] for b in r['bookmarks']) or '-'}")
+    if "tables" in chosen:
+        ignore = () if apply else purge_preview
+        g2 = gp.build_graph(fleet, defn, ignore_measures=ignore)
+        dead = sorted(g2.dead) if g2 else []
+        targets = [t for t in dead if t in plan["exclusive"]["fact_tables"]]
+        out.append(f"dead fact tables: {', '.join(dead) or '-'}")
+        for t in targets:
+            rep = run(lambda ch, t=t: gp.drop_table(fleet, mdir, t, ch))
+            out.append(f"table {t}: relationships "
+                       f"{len(rep['relationships'])}, sensors "
+                       f"{sum(rep['sensors'].values())}, Q&A entities "
+                       f"{rep['qa_entities']}, report edits "
+                       f"{sum(rep['reports'].values())}, deregistered "
+                       f"{'yes' if rep['registration'] else 'no'}")
+            for line in rep["manual_review"]:
+                out.append(f"  manual review: {line}")
+    if present and "mapping" in chosen:
+        r = run(lambda ch: gp.layer_mapping(defn, c, drop, ch))
+        out.append(f"mapping rows removed: {r.get('removed', 0)}")
+    return out
+
+
+def _verify(cmd, mdir):
+    import shlex
+    import subprocess
+    try:
+        r = subprocess.run(shlex.split(cmd.format(model=str(mdir))),
+                           capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError) as e:
+        click.echo(f"  verify: could not run ({e})")
+        return
+    click.echo(f"  verify: exit {r.returncode}")
+    for line in (r.stdout + r.stderr).strip().split("\n")[-8:]:
+        click.echo(f"    {line}")
+
+
+@groups_group.command("drop-table")
+@_fleet_option
+@_target_options
+@click.option("--tables", "tables", multiple=True, required=True,
+              help="A table to drop (repeatable).")
+@click.option("--apply", "apply", is_flag=True,
+              help="Write the changes (default: dry run).")
+def groups_drop_table(fleet_path, model, all_models, path, tables,
+                      apply) -> None:
+    """Drop tables and every surface they occupy: boolean sensors in other
+    measures, relationships, model registration, the Q&A schema, report
+    bindings, then the file."""
+    from . import groups as gp
+    fleet = _load(fleet_path)
+    for name, mdir in _group_targets(fleet, model, all_models, path):
+        click.echo(f"== {name} ({mdir})")
+        for t in tables:
+            changes = []
+            try:
+                rep = gp.drop_table(fleet, mdir, t, changes)
+                if apply:
+                    gp.write_changes(changes)
+            except (DriftDoctorError, TmdlEditError) as e:
+                click.echo(f"  ERROR {t}: {e}", err=True)
+                sys.exit(1)
+            click.echo(f"  {t}: file {rep['file'] or 'absent'}; sensors "
+                       f"{rep['sensors'] or 0}; relationships "
+                       f"{', '.join(rep['relationships']) or '-'}; "
+                       f"deregistered {'yes' if rep['registration'] else 'no'}"
+                       f"; Q&A {rep['qa_entities']} entities / "
+                       f"{rep['qa_relationships']} relationships; reports "
+                       f"{rep['reports'] or 0}")
+            for line in rep["manual_review"]:
+                click.echo(f"    manual review: {line}")
+        click.echo("  applied" if apply else
+                   "  dry run: nothing was written (use --apply)")
+
+
 # ───────────────────────────── view enrichment ─────────────────────────────
 
 @main.group("enrichment")

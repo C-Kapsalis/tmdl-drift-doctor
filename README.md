@@ -344,6 +344,9 @@ than a clean `detect`:
 | `renames check` / `renames apply` | Checks that every `renames:` target exists in each model / rewrites references to the old names | 0 / 1 |
 | `remediate --ref NAME` | Pushes one template measure to every model where each hosts it (lineage tag kept, overrides honored); `--add-missing` inserts it where absent | 0 / 1 / 2 for an unknown name |
 | `enrichment rescan` / `enrichment report` | Checks that the view-enrichment registry still matches the models / renders it as a markdown table | 0, 5 on a stale entry |
+| `groups plan --drop G` | Read-only: which field groups and fact tables are exclusive to the dropped groups and which are shared (and by whom); dead fact tables | 0 / 2 |
+| `groups drop --drop G [--layer L] [--apply]` | Drops groups in dependency order: selector branches, measures, selector rows, annotation, gates, bookmarks, dead fact tables, mapping rows last; a dry run by default | 0 / 1 / 2 |
+| `groups drop-table --tables T [--apply]` | Removes a table everywhere: boolean sensors in other measures, relationships, registration, Q&A schema, report bindings, the file; anything else is listed for manual review | 0 / 1 |
 | `mapping decode` / `mapping diff` / `mapping union` | Prints an encoded mapping table's rows per category / compares two tables' categories / writes the template rows plus the derived-only rows into a table | 0 / 2 on bad input |
 | `fieldparam retag --from A --to B --display D FILES` | Moves the named live field-parameter rows from category A to B (only the category literal changes); nothing is written unless every row is found | 0 / 1 |
 | `review --out REVIEW.md` | Writes a per-model checklist of everything routed to a human: blocked retirements, precondition skips, wrong or duplicate hosts, advisories, overrides in force | 0 |

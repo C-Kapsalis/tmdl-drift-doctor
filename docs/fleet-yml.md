@@ -32,6 +32,10 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `incremental_refresh` | `{enabled, fact_pattern, exempt}` | on; fact tables by role; `[]` | Which fact tables follow the template's incremental-refresh policy and window. |
 | `purge` | `{enabled, infrastructure_fraction}` | off; `0.5` | The pristine-category purge (`detect --sync`, `remediate --sync`). A table serving at least this fraction of all mapping categories is shared infrastructure and never decides a category. |
 | `protected_name_pattern` | regular expression (case-insensitive) | none | Names (display, table, column, category, key) no removal path ever touches and no digest nags about. |
+| `grouping` | `{source, mapping_table, group_column, field_group_column, annotation_prefix, selector_tables, dimension_selector_tables, row_drop_tables, non_attributing_field_groups, sensor_functions}` | first mapping table; columns 0 and 2; `Category_`; `x-Selector *`; `y-Selector *`; the four axis families; blank and calendar field groups; the six sensor functions | How `groups plan` / `groups drop` read groups, field groups and selector rows. |
+| `gates` | `{prefix, aggregate}` | `f-`, `f-All` | Per-group gate measures and the aggregate gate the drop edits. |
+| `bookmarks` | `{group_column, exempt_display_names}` | `Analysis Category`, `++new report` | Which bookmark filters pin a group. |
+| `measure_liveness` | `{helper_prefixes, diagnostic_prefixes, always_live}` | `- _ !`, `i-`, `[]` | Which measures of a dropped group's component stay (user-facing, diagnostic, listed, bound in a report). |
 | `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |
 | `renames.columns` | mapping `Table.Old` -> `Table.New` | `{}` | Column renames (split at the last dot; cross-table moves are ignored). |
 | `renames.profiles` | mapping name -> `{measures, columns}` | `{}` | Alternative maps; a model selecting one (`rename_profile`) uses it INSTEAD of the default maps. |
