@@ -17,14 +17,23 @@ def test_wrong_host_replaces_missing_and_extra(captured):
     assert ("extra.measure", f"Members[{VPM}]") not in alpha
 
 
-def test_duplicate_host_is_advisory(captured):
+def test_duplicate_host_removes_the_stale_copy_only_when_allowlisted(captured):
     f = next(f for f in detect_all(captured, model_filter="bravo")
              if f.kind == "measure.duplicate_host")
-    assert f.ref == f"Members[{VPM}]" and f.advisory
+    assert f.ref == f"Members[{VPM}]" and not f.advisory
     result = remediate(captured, [f])
-    assert result.outcomes[0].status == "skipped"
+    assert result.outcomes[0].status == "skipped"      # not allowlisted
     bravo = parse_model(captured.model_definition("bravo"))
     assert bravo.measure("Members", VPM) is not None
+
+    captured.allowlist_kinds.add("measure.duplicate_host")
+    result = remediate(captured, [f])
+    assert result.count("applied") == 1
+    bravo = parse_model(captured.model_definition("bravo"))
+    assert bravo.measure("Members", VPM) is None
+    assert bravo.measure("Visits", VPM) is not None    # the host's copy stays
+    assert not [x for x in detect_all(captured, model_filter="bravo")
+                if x.ref.endswith(f"[{VPM}]")]
 
 
 def test_move_is_verbatim_and_writes_destination_first(captured):
@@ -60,7 +69,8 @@ def test_move_waits_when_old_host_is_referenced_qualified(captured):
 
 def test_missing_never_inserts_a_name_present_elsewhere(captured):
     """A template measure absent from its host but present on two other
-    tables is reported per host (advisory), never inserted a third time."""
+    tables is one wrong-host move (from the alphabetically first table),
+    never inserted a third time."""
     vf = captured.model_definition("alpha") / "tables" / "Classes.tmdl"
     edit_file(vf, "\tpartition Classes = m",
               f"\tmeasure '{VPM}' = 1\n"
@@ -68,9 +78,9 @@ def test_missing_never_inserts_a_name_present_elsewhere(captured):
               "\tpartition Classes = m")
     alpha = [f for f in detect_all(captured, model_filter="alpha")
              if f.ref.endswith(f"[{VPM}]")]
-    assert {(f.kind, f.ref) for f in alpha} == {
-        ("measure.duplicate_host", f"Members[{VPM}]"),
-        ("measure.duplicate_host", f"Classes[{VPM}]")}
+    assert [(f.kind, f.ref, f.data["from_table"]) for f in alpha] == [
+        ("measure.wrong_host", f"Visits[{VPM}]", "Classes")]
+    assert "body also differs" in alpha[0].detail
 
 
 def test_table_copy_waits_when_it_would_duplicate_a_measure(captured):

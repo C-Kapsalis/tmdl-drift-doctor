@@ -20,6 +20,13 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `overlays.dir` | path | `overlays` | Per-model overlay folders (`<dir>/<model id>/{policy,dq,mapping}.yml`). |
 | `families.growth.suffixes` | list (two or more) | `Growth.SemanticModel`, `insights.SemanticModel` | Folder suffixes that make a model a growth-family member. |
 | `metadata.total` | integer | none | When present, must equal the number of model entries. |
+| `count_floor.family_prefixes` | list of table-name prefixes | `x-Selector`, `x-Plot Specific`, `y-Selector`, `y-Plot Specific` | Axis-table families. A missing axis table fails `detect` whatever `allowlist.kinds` says. |
+| `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |
+| `renames.columns` | mapping `Table.Old` -> `Table.New` | `{}` | Column renames (split at the last dot; cross-table moves are ignored). |
+| `renames.profiles` | mapping name -> `{measures, columns}` | `{}` | Alternative maps; a model selecting one (`rename_profile`) uses it INSTEAD of the default maps. |
+| `renames.pairing` | `{prefix_sigils, exclude_prefixes}` | `- _ ! # ^` (plus one letter and a dash); `i-` | How `measure.renamed` pairs a missing template measure with a derived one: same name after stripping one prefix, trimmed, lower-cased. |
+| `renames.format_table` | table name | none | The format-selector table `rename measure` checks for a precision loss. |
+| `renames.format_family` | string | `cost` | The literal whose test a `--format-arm` is inserted in front of. |
 
 ## Model entries
 
@@ -35,6 +42,7 @@ An entry is a bare path or a mapping:
 | `family` | string | Explicit family membership. |
 | `workspace` | `{name, guid, tenant_id, verified}` | GUIDs are checked; `verified` is a date or `false`; no two entries share a workspace guid. |
 | `overrides` | list or typed sections | Declared, reviewed divergence (below). |
+| `rename_profile` | string | The `renames.profiles` entry this model uses. |
 
 ## Overrides
 

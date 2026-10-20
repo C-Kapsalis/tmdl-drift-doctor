@@ -515,10 +515,68 @@ def register_table(model_content: str, table_name: str) -> str:
 
 
 def deregister_table(model_content: str, table_name: str) -> str:
-    """Remove the ``ref table <name>`` line from model.tmdl."""
-    ref_stmt = f"ref table {smart_quote(table_name)}"
-    pattern = re.compile(rf"^{re.escape(ref_stmt)}\s*\n?", re.MULTILINE)
-    return pattern.sub("", model_content)
+    """Remove the ``ref table <name>`` line (quoted or bare form) and the
+    name's ``PBI_QueryOrder`` entry from model.tmdl. Idempotent."""
+    forms = {f"ref table {smart_quote(table_name)}",
+             f"ref table {table_name}",
+             "ref table '" + table_name.replace("'", "''") + "'"}
+    out = model_content
+    for ref_stmt in forms:
+        pattern = re.compile(rf"^{re.escape(ref_stmt)}[ \t]*\n?", re.MULTILINE)
+        out = pattern.sub("", out)
+    return deregister_query_order(out, table_name)
+
+
+_QUERY_ORDER = re.compile(r"^(annotation PBI_QueryOrder\s*=\s*)(\[.*\])[ \t]*$",
+                          re.MULTILINE)
+
+
+def _query_order(model_content: str):
+    m = _QUERY_ORDER.search(model_content)
+    if not m:
+        return None, None
+    import json
+    try:
+        names = json.loads(m.group(2))
+    except ValueError:
+        return m, None
+    return m, names if isinstance(names, list) else None
+
+
+def register_query_order(model_content: str, table_name: str) -> str:
+    """Append `table_name` to the model's ``PBI_QueryOrder`` array (M tables
+    only; the caller decides). Nothing changes when the model has no such
+    annotation or already lists the name."""
+    m, names = _query_order(model_content)
+    if m is None or names is None or table_name in names:
+        return model_content
+    import json
+    body = m.group(2)
+    item = json.dumps(table_name, ensure_ascii=False)
+    sep = ", " if ", " in body else ","
+    new_body = (body[:-1] + (sep if names else "") + item + "]")
+    return model_content[:m.start(2)] + new_body + model_content[m.end(2):]
+
+
+def deregister_query_order(model_content: str, table_name: str) -> str:
+    """Drop `table_name` and ONE adjacent comma from ``PBI_QueryOrder``."""
+    m, names = _query_order(model_content)
+    if m is None or names is None or table_name not in names:
+        return model_content
+    import json
+    body = m.group(2)
+    item = re.escape(json.dumps(table_name, ensure_ascii=False))
+    new_body, n = re.subn(r"\s*" + item + r"\s*,\s*", "", body, count=1)
+    if not n:
+        new_body = re.sub(r"\s*,\s*" + item + r"(?=\s*\])", "", body, count=1)
+        new_body = re.sub(r"\[\s*" + item + r"\s*\]", "[]", new_body)
+    return model_content[:m.start(2)] + new_body + model_content[m.end(2):]
+
+
+def is_m_table(table_content: str) -> bool:
+    """Does the table load through Power Query (an ``= m`` partition)?"""
+    return bool(re.search(r"^\tpartition\s+.+?=\s*m\s*$", table_content,
+                          re.MULTILINE))
 
 
 # ───────────────────────── expressions.tmdl blocks ─────────────────────────

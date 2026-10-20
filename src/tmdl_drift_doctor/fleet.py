@@ -77,7 +77,8 @@ SECTIONS = {
 
 _ENTRY_KEYS = {"path", "gating", "gating_reason", "overrides",
                "secondary_models", "connection", "family", "source_divergent",
-               "workspace", "rename_map", "visibility", "snapshots"}
+               "workspace", "rename_map", "visibility", "snapshots",
+               "rename_profile"}
 _SECONDARY_KEYS = {"name", "path", "deviations", "gating", "gating_reason",
                    "connection", "family"}
 _CONNECTION_KEYS = {"project", "billing_project", "dataset"}

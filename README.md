@@ -182,7 +182,7 @@ ledger. A retirement that derived work still depends on is refused: retire
 
 | Kind | What it means | What remediation does | Gated by |
 |---|---|---|---|
-| `table.missing` | Template table absent from a derived model | Copy the table file (all lineage tags regenerated) + register `ref table` in `model.tmdl` | allowlist |
+| `table.missing` | Template table absent from a derived model | Copy the table file (all lineage tags regenerated) + register `ref table` (and, for a Power Query table, its `PBI_QueryOrder` entry) in `model.tmdl` | allowlist (a missing axis table fails `detect` regardless) |
 | `column.missing` | Template column absent from a shared table | Splice the template's raw column block (fresh lineage tag) | allowlist |
 | `measure.missing` | Template measure absent from a shared table | Splice the template's raw measure block, `///` description included | allowlist |
 | `mapping_row.missing` | Template lookup-table row absent | Insert the row tuple after the last existing row | allowlist |
@@ -191,7 +191,8 @@ ledger. A retirement that derived work still depends on is refused: retire
 | `column.property_drift` | Shared column's type/format/summarization diverged | Same block overwrite | allowlist |
 | `expression.drift` | An allowlist-**named** shared parameter diverged or is absent | Replace exactly that expression block; the rest of `expressions.tmdl` stays byte-untouched | allowlist (name gates detection too) |
 | `measure.wrong_host` | A template measure lives on a different table in the derived model | Move the derived block verbatim to the template's host (DAX and lineage tag untouched; destination written first) | allowlist |
-| `measure.duplicate_host` | The same measure name sits on more than one table | Nothing: advisory (the model will not load until a copy is removed by hand) | never remediated |
+| `measure.duplicate_host` | The same measure name sits on the template's host and on another table (the model will not load) | Remove the stale extra copy; the copy on the template's host stays | allowlist |
+| `measure.renamed` | The template renamed a measure (one missing name and one derived-only name share a core: same name once one prefix such as `-`, `_`, `#` or `x-` is stripped) | Rename the derived declaration, rewrite every DAX reference, and (with pbi-plot-styler installed) every report binding | allowlist |
 | `relationship.missing` | Template relationship (matched on `From[col] -> To[col]`, never on its GUID) absent | Append the template's raw block, once both endpoint columns exist | allowlist |
 | `relationship.modified` | Same endpoints, different cardinality, direction, or active flag | Overwrite with the template's block, keeping the derived block name | allowlist |
 | `relationship.extra` | Derived-only relationship between two shared tables | Nothing: advisory | never remediated |
@@ -326,6 +327,9 @@ than a clean `detect`:
 | `ratchet tighten` | Seeds or lowers `.drift-doctor/floors.json` to `min(floor, current)` per model, total and per kind; never raises a floor; only from a full-fleet, unfiltered, error-free run | 0, or 2 for an untrusted report |
 | `ratchet check` | Fails if any model's actionable count rises above its floor, or any `retire.*` finding exists (a resurrection: hard zero, never floored) | 0 / 1 / 2 |
 | `audit` | Re-verifies every `remediated` ledger event: added objects still present, retired objects not back | 0, or 4 on a revert |
+| `rename measure OLD NEW` | Renames a measure in the template and every model: picker labels, the declaration, DAX references (text comparisons included) and report bindings; `--dry-run` first | 0, 1 when no model declares OLD, 2 on a precision loss without `--format-arm` |
+| `renames check` / `renames apply` | Checks that every `renames:` target exists in each model / rewrites references to the old names | 0 / 1 |
+| `remediate --ref NAME` | Pushes one template measure to every model where each hosts it (lineage tag kept, overrides honored); `--add-missing` inserts it where absent | 0 / 1 / 2 for an unknown name |
 | `review --out REVIEW.md` | Writes a per-model checklist of everything routed to a human: blocked retirements, precondition skips, wrong or duplicate hosts, advisories, overrides in force | 0 |
 
 Keep `remediate` on a maintainer's machine where the diffs get reviewed and

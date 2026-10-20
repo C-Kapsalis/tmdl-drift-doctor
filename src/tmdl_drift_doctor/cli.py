@@ -254,6 +254,13 @@ def _print_findings(fleet, findings, errors, model_filter, kind_filter):
 @click.option("--confirm-deletions", is_flag=True,
               help="With --sync: the explicit second confirmation that lets "
                    "deletions run without a terminal (for scheduled jobs).")
+@click.option("--ref", "refs", multiple=True, metavar="NAME",
+              help="Push only this template measure (bare name or "
+                   "Table[Measure]; repeatable) to every model, where each "
+                   "model hosts it. Other drift is left alone.")
+@click.option("--add-missing", is_flag=True,
+              help="With --ref: also insert the measure into models that "
+                   "lack it (on the template's host table).")
 @click.option("--backup", is_flag=True,
               help="Copy each file to <name>.bak_<timestamp> before its first "
                    "write in this run; the copies are removed when the run "
@@ -261,8 +268,8 @@ def _print_findings(fleet, findings, errors, model_filter, kind_filter):
 @click.option("--allow-stale", is_flag=True,
               help="Proceed on a stale baseline (misclassification risk).")
 def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
-              assume_yes, interactive, confirm_deletions, backup,
-              allow_stale) -> None:
+              assume_yes, interactive, confirm_deletions, refs, add_missing,
+              backup, allow_stale) -> None:
     """Cascade template truth into the derived models (allowlist-gated).
 
     On a terminal every fix is confirmed (y/n, a = yes to the rest, q =
@@ -270,6 +277,10 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
     at least one --kind, and even then deletions are never applied: they
     need an interactive yes, or --sync with --confirm-deletions."""
     from .interactive import Quit, ask, stdin_is_interactive
+    if refs:
+        _remediate_refs(fleet_path, refs, add_missing, model_filter, dry_run,
+                        assume_yes, allow_stale)
+        return
     if assume_yes and not kinds:
         click.echo("ERROR: --yes requires an explicit --kind (it never "
                    "applies every kind at once)", err=True)
@@ -340,6 +351,50 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
                       f"converging; run again")
         click.echo(f"── {state}")
     if failed:
+        sys.exit(1)
+
+
+def _remediate_refs(fleet_path, refs, add_missing, model_filter, dry_run,
+                    assume_yes, allow_stale):
+    from .interactive import ask, stdin_is_interactive
+    from .named import cascade_named
+    fleet = _load(fleet_path)
+    _fresh_baseline(fleet, allow_stale)
+    if model_filter and model_filter not in fleet.models:
+        raise ConfigError(f"unknown model '{model_filter}'; fleet.yml "
+                          f"defines: {', '.join(fleet.models)}")
+    try:
+        plan = cascade_named(fleet, refs, add_missing=add_missing,
+                             model_filter=model_filter, dry_run=True)
+    except DriftDoctorError as e:
+        raise ConfigError(str(e))
+    todo = [o for o in plan.outcomes if o.status == "would-apply"]
+    go = False
+    if todo and not dry_run:
+        if assume_yes:
+            go = True
+        elif stdin_is_interactive():
+            go = bool(ask(f"Apply {len(todo)} change(s) for "
+                          f"{', '.join(refs)}?"))
+        else:
+            click.echo("note: stdin is not a terminal and --yes was not "
+                       "given; nothing is applied (non-interactive).")
+    result = cascade_named(fleet, refs, add_missing=add_missing,
+                           model_filter=model_filter, dry_run=not go)
+    for o in result.outcomes:
+        tag = {"applied": "applied", "would-apply": "would apply",
+               "failed": "FAILED"}.get(o.status, "skipped")
+        click.echo(f"[{tag}] {o.model}: {o.measure} — {o.reason}")
+        if o.status == "would-apply" and dry_run and o.path is not None:
+            import difflib
+            click.echo("".join(difflib.unified_diff(
+                o.old.splitlines(True), o.new.splitlines(True),
+                fromfile=f"a/{o.path}", tofile=f"b/{o.path}")))
+    click.echo(f"\n── summary: applied={result.count('applied')} "
+               f"would-apply={result.count('would-apply')} "
+               f"skipped={result.count('skipped')} "
+               f"failed={result.count('failed')}")
+    if result.count("failed"):
         sys.exit(1)
 
 
@@ -616,6 +671,169 @@ def ledger(fleet_path, as_json, revive_ref, kind, model, note) -> None:
         if e.get("note"):
             parts.append(f"({e['note']})")
         click.echo("  ".join(p for p in parts if p))
+
+
+# ───────────────────────────── renames ─────────────────────────────
+
+@main.group("rename")
+def rename_group() -> None:
+    """Rename an object everywhere it is used."""
+
+
+@rename_group.command("measure")
+@_fleet_option
+@click.argument("old")
+@click.argument("new")
+@click.option("--old-label", default=None,
+              help="Picker label to replace (default: OLD).")
+@click.option("--new-label", default=None,
+              help="Picker label to write (default: NEW).")
+@click.option("--format-arm", "format_arms", multiple=True,
+              metavar="MODEL=FORMAT",
+              help="Insert a format arm for NEW in MODEL's format selector "
+                   "when NEW would show fewer decimals (repeatable).")
+@click.option("--model", "model_filters", multiple=True,
+              help="Only models whose path contains this text (repeatable).")
+@click.option("--include-unlisted", is_flag=True, hidden=True,
+              help="Accepted for compatibility; every model is in fleet.yml.")
+@click.option("--dry-run", is_flag=True, help="Print the plan; write nothing.")
+@click.option("--yes", "assume_yes", is_flag=True,
+              help="Apply without the one confirmation.")
+def rename_measure_cmd(fleet_path, old, new, old_label, new_label,
+                       format_arms, model_filters, include_unlisted, dry_run,
+                       assume_yes) -> None:
+    """Rename measure OLD to NEW in the template and every model: picker
+    labels, the declaration, DAX references (text comparisons included) and
+    report bindings. Exit 1 when no model declares OLD, 2 when a precision
+    loss would remain (pass --format-arm)."""
+    from .interactive import ask
+    from .renames import plan_measure_rename, write_plan
+    fleet = _load(fleet_path)
+    arms = {}
+    for spec in format_arms:
+        if "=" not in spec:
+            raise ConfigError(f"--format-arm needs MODEL=FORMAT (got {spec!r})")
+        k, v = spec.split("=", 1)
+        arms[k] = v
+    plans = plan_measure_rename(fleet, old, new, old_label=old_label,
+                                new_label=new_label, format_arms=arms,
+                                model_filters=model_filters)
+    if not plans:
+        click.echo(f"no model declares measure '{old}'; nothing to rename.")
+        sys.exit(1)
+    totals = {"labels": 0, "decl": 0, "dax": 0, "reports": 0, "arm": 0}
+    for p in plans:
+        reports = "n/a" if p.reports is None else p.reports
+        flag = "  PRECISION LOSS" if p.risks else ""
+        arm = f" arm {p.format_arm}" if p.format_arm else ""
+        click.echo(f"{p.name}: labels {p.labels} decl {p.decl} dax {p.dax} "
+                   f"reports {reports}{arm}{flag}")
+        for e in p.errors:
+            click.echo(f"  ERROR {e}", err=True)
+        totals["labels"] += p.labels
+        totals["decl"] += p.decl
+        totals["dax"] += p.dax
+        totals["reports"] += p.reports or 0
+        totals["arm"] += p.format_arm
+    click.echo("total: " + " ".join(f"{k} {v}" for k, v in totals.items()))
+    if any(p.reports is None for p in plans):
+        click.echo("note: pbi-plot-styler is not installed, so report "
+                   "references are neither counted nor rewritten.")
+    risky = [p for p in plans if p.risks]
+    if risky:
+        for p in risky:
+            for path, before, after in p.risks:
+                click.echo(f"precision loss in {p.name} ({path}): '{old}' "
+                           f"shows {before}, '{new}' would show {after}")
+        click.echo("pass --format-arm MODEL=FORMAT for each model listed")
+        sys.exit(USAGE_EXIT)
+    if any(p.errors for p in plans):
+        sys.exit(1)
+    if dry_run:
+        return
+    if not assume_yes and not ask(f"Rename '{old}' to '{new}' in "
+                                  f"{len(plans)} model(s)?"):
+        click.echo("declined; nothing was written.")
+        sys.exit(1)
+    for p in plans:
+        write_plan(p)
+    click.echo(f"renamed in {len(plans)} model(s).")
+
+
+@main.group("renames")
+def renames_group() -> None:
+    """The reviewed rename map (`renames:` in fleet.yml)."""
+
+
+@renames_group.command("check")
+@_fleet_option
+@click.option("--model", "model_filter", default=None, help="Only this model.")
+def renames_check(fleet_path, model_filter) -> None:
+    """Every non-empty measure rename must point at a measure the model
+    declares. Exit 1 when one does not."""
+    from .renames import fleet_rename_map, model_profile
+    fleet = _load(fleet_path)
+    try:
+        rmap = fleet_rename_map(fleet)
+    except DriftDoctorError as e:
+        raise ConfigError(str(e))
+    names = list(fleet.models)
+    if model_filter:
+        if model_filter not in fleet.models:
+            click.echo(f"warning: unknown model '{model_filter}', skipped",
+                       err=True)
+            names = []
+        else:
+            names = [model_filter]
+    bad = False
+    for name in names:
+        valid, invalid = rmap.for_profile(model_profile(fleet, name)).check(
+            fleet.model_definition(name))
+        click.echo(f"{name}: {valid} valid mapping(s)")
+        for o, n in invalid:
+            click.echo(f"  {o} -> {n} (target doesn't exist)")
+            bad = True
+    if bad:
+        sys.exit(1)
+
+
+@renames_group.command("apply")
+@_fleet_option
+@click.option("--model", "model_filter", default=None, help="Only this model.")
+@click.option("--dry-run", is_flag=True, help="Count only; write nothing.")
+@click.option("--yes", "assume_yes", is_flag=True,
+              help="Apply without the one confirmation.")
+def renames_apply(fleet_path, model_filter, dry_run, assume_yes) -> None:
+    """Rewrite references to renamed measures and columns in every model
+    (declarations are not renamed; see `rename measure`)."""
+    from .interactive import ask
+    from .renames import fleet_rename_map, model_profile, rewrite_model
+    fleet = _load(fleet_path)
+    try:
+        rmap = fleet_rename_map(fleet)
+    except DriftDoctorError as e:
+        raise ConfigError(str(e))
+    names = [model_filter] if model_filter else list(fleet.models)
+    if model_filter and model_filter not in fleet.models:
+        raise ConfigError(f"unknown model '{model_filter}'")
+    if not dry_run and not assume_yes and not ask(
+            f"Rewrite rename references in {len(names)} model(s)?"):
+        click.echo("declined; nothing was written.")
+        sys.exit(1)
+    failed = False
+    for name in names:
+        m = rmap.for_profile(model_profile(fleet, name))
+        res = rewrite_model(fleet.model_definition(name),
+                            m.active_measures(), m.columns, dry_run=dry_run)
+        for e in res.errors:
+            click.echo(f"{name}: ERROR {e}", err=True)
+            failed = True
+        click.echo(f"{name}: files {len(res.files_modified)} measures "
+                   f"{res.measures_modified} replacements {res.replacements} "
+                   f"relationships {res.relationships}"
+                   + (" (dry run)" if dry_run else ""))
+    if failed:
+        sys.exit(1)
 
 
 # ───────────────────────────── fleet ─────────────────────────────

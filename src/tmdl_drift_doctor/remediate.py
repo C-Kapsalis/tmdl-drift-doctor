@@ -59,11 +59,17 @@ class FileChange:
     new: Optional[str]
 
     def diff(self) -> str:
-        a = (self.old or "").splitlines(keepends=True)
-        b = (self.new or "").splitlines(keepends=True)
+        a = _as_text(self.old).splitlines(keepends=True)
+        b = _as_text(self.new).splitlines(keepends=True)
         label = str(self.path)
         return "".join(difflib.unified_diff(
             a, b, fromfile=f"a/{label}", tofile=f"b/{label}"))
+
+
+def _as_text(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8-sig", errors="replace")
+    return value or ""
 
 
 class _Skip(Exception):
@@ -126,10 +132,14 @@ def _apply_table_missing(fleet: Fleet, f: Finding) -> tuple:
     derived, template = _model_paths(fleet, f)
     src = _table_file(template, f.ref)
     dst = derived / "tables" / src.name
+    if dst.exists():
+        return ("table file already present", [])
     content = te.regenerate_all_lineage_tags(src.read_text(encoding="utf-8"))
     model_file = derived / "model.tmdl"
     model_old = model_file.read_text(encoding="utf-8")
     model_new = te.register_table(model_old, f.ref)
+    if te.is_m_table(content):
+        model_new = te.register_query_order(model_new, f.ref)
     changes = [FileChange(dst, None, content)]
     if model_new != model_old:
         changes.append(FileChange(model_file, model_old, model_new))
@@ -347,6 +357,61 @@ def _apply_measure_wrong_host(fleet: Fleet, f: Finding) -> tuple:
              FileChange(src_file, src, new_src)])
 
 
+def _apply_measure_renamed(fleet: Fleet, f: Finding) -> tuple:
+    """Rename the derived declaration (body untouched), then rewrite every
+    DAX reference in the model and every report reference below it."""
+    from .renames import (count_report_refs, rename_declaration,
+                          report_changes, rewrite_measure_text)
+    derived, _ = _model_paths(fleet, f)
+    old, new, host = f.data["old"], f.data["new"], f.data["host"]
+    host_file = _table_file(derived, host)
+    changes, refs = [], 0
+    for path in sorted((derived / "tables").glob("*.tmdl"),
+                       key=lambda p: p.name):
+        text = path.read_text(encoding="utf-8")
+        updated = text
+        if path == host_file:
+            updated = rename_declaration(text, old, new)
+            if updated is None:
+                raise DriftDoctorError(
+                    f"measure '{old}' is no longer declared on '{host}': the "
+                    f"model changed after detection. Re-run `drift-doctor "
+                    f"detect`.")
+        updated, _n, hits = rewrite_measure_text(updated, {old: new})
+        refs += hits
+        if updated != text:
+            changes.append(FileChange(path, text, updated))
+    reports, n_reports = report_changes(fleet.models[f.model], old, new)
+    for path, raw, data in reports:
+        changes.append(FileChange(path, raw, data))
+    label = (f"rename measure on '{host}': '{old}' -> '{new}' ({refs} DAX "
+             f"reference(s) rewritten")
+    if n_reports is None:
+        left = count_report_refs(fleet.models[f.model], old)
+        label += ("; report references NOT rewritten: install "
+                  "pbi-plot-styler next to drift-doctor" if left is None
+                  else "")
+    else:
+        label += f", {n_reports} report reference(s)"
+    return label + ")", changes
+
+
+def _apply_measure_duplicate_host(fleet: Fleet, f: Finding) -> tuple:
+    """Remove the stale extra copy; the copy on the template's host stays."""
+    derived, _ = _model_paths(fleet, f)
+    table, name = _split_ref(f.ref)
+    path = derived / "tables" / f"{table}.tmdl"
+    if not path.exists():
+        return ("table file already gone", [])
+    old = path.read_text(encoding="utf-8")
+    new = te.remove_block(old, "measure", name)
+    if new is None:
+        return ("stale copy already removed", [])
+    return (f"remove the stale copy of '{name}' from '{table}' (the copy on "
+            f"'{f.data.get('template_host')}' is kept)",
+            [FileChange(path, old, new)])
+
+
 def _template_relationship_block(fleet: Fleet, sig: str) -> str:
     t_file = fleet.template_definition / "relationships.tmdl"
     content = t_file.read_text(encoding="utf-8") if t_file.exists() else ""
@@ -452,6 +517,8 @@ APPLIERS: dict = {
     "measure.expression_drift": _apply_measure,
     "measure.property_drift": _apply_measure,
     "measure.wrong_host": _apply_measure_wrong_host,
+    "measure.renamed": _apply_measure_renamed,
+    "measure.duplicate_host": _apply_measure_duplicate_host,
     "relationship.missing": _apply_relationship_missing,
     "relationship.modified": _apply_relationship_modified,
     "retire.relationship": _apply_retire_relationship,
@@ -520,6 +587,9 @@ class RunState:
             self.measure_names.add(split_ref(f.ref)[1])
         elif kind == "relationship.missing":
             self.added.add(("relationship", f.ref))
+        elif kind == "measure.renamed":
+            self.added.add(("measure", f"{f.data['host']}[{f.data['new']}]"))
+            self.measure_names.add(f.data["new"])
         elif kind in ("measure.expression_drift", "measure.property_drift",
                       "column.property_drift"):
             self.overwritten.add(f.ref)
@@ -659,8 +729,9 @@ PRECONDITIONS: dict = {
 PHASES = (
     "table.missing", "column.missing", "column.property_drift",
     "expression.drift", "expression.missing", "mapping_row.missing",
-    "measure.missing",
-    "measure.wrong_host", "measure.expression_drift", "measure.property_drift",
+    "measure.renamed", "measure.missing",
+    "measure.wrong_host", "measure.duplicate_host",
+    "measure.expression_drift", "measure.property_drift",
     "relationship.missing", "relationship.modified",
     "relationship.casing_mismatch", "retire.relationship", "retire.measure", "retire.mapping_row",
     "retire.column", "retire.table",
@@ -680,7 +751,8 @@ def _phase(f: Finding) -> tuple:
 BATCH_SAFE_KINDS = (
     "table.missing", "column.missing", "column.property_drift",
     "measure.missing", "measure.expression_drift", "measure.property_drift",
-    "measure.wrong_host", "measure.renamed", "expression.drift",
+    "measure.wrong_host", "measure.duplicate_host", "measure.renamed",
+    "expression.drift",
     "expression.missing", "mapping_row.missing", "mapping_category.missing",
     "relationship.missing", "relationship.modified",
     "relationship.casing_mismatch", "category_annotation.undeclared",
@@ -835,7 +907,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                     f"(overrides.files): {exempt.reason}")
                 continue
             for c in changes:
-                if c.new is not None and c.path.suffix == ".tmdl":
+                if isinstance(c.new, str) and c.path.suffix == ".tmdl":
                     te.assert_tmdl_valid(c.new)   # guard BEFORE any write
             if dry_run:
                 state.record(f)
@@ -857,6 +929,9 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                         shutil.rmtree(c.path)
                     elif c.path.exists():
                         c.path.unlink()
+                elif isinstance(c.new, bytes):
+                    c.path.parent.mkdir(parents=True, exist_ok=True)
+                    c.path.write_bytes(c.new)
                 else:
                     c.path.parent.mkdir(parents=True, exist_ok=True)
                     c.path.write_text(c.new, encoding="utf-8")

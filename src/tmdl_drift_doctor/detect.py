@@ -46,9 +46,11 @@ REMEDIABLE_KINDS = (
     "table.missing",
     "column.missing",
     "measure.missing",
+    "measure.renamed",
     "measure.expression_drift",
     "measure.property_drift",
     "measure.wrong_host",
+    "measure.duplicate_host",
     "column.property_drift",
     "expression.drift",
     "expression.missing",
@@ -65,8 +67,7 @@ REMEDIABLE_KINDS = (
 
 # Kinds that only inform, never remediated: deleting or relocating a derived
 # model's own work is a human decision, full stop.
-ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra",
-                  "measure.duplicate_host")
+ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra")
 
 # Kinds detection offers only in --sync mode (the purge channel).
 SYNC_ONLY_KINDS = ()
@@ -132,8 +133,18 @@ def is_actionable(f: Finding, fleet: Fleet) -> bool:
     """THE predicate shared by detect's exit code, the ratchet and review:
     a finding is actionable when its kind is allowlisted, it is not
     advisory, and no override acknowledges it."""
-    return ((fleet.allows(f.kind) or f.kind in ALWAYS_GATING)
+    return ((fleet.allows(f.kind) or f.kind in ALWAYS_GATING
+             or _missing_axis_table(f, fleet))
             and not f.advisory and not f.overridden)
+
+
+def _missing_axis_table(f: Finding, fleet: Fleet) -> bool:
+    """A missing table of an axis family gates whatever the allowlist says
+    (remediation still needs the allowlist or an interactive yes)."""
+    if f.kind != "table.missing":
+        return False
+    from .metrics import family_of, family_prefixes
+    return family_of(f.ref, family_prefixes(fleet.raw)) is not None
 
 
 def is_gating(f: Finding, fleet: Fleet) -> bool:
@@ -299,11 +310,14 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
             findings.append(Finding(
                 kind="table.missing", model=name, ref=tname,
                 detail=f"template table '{tname}' is absent from '{name}'"))
-            for mname in (body.get("measures") or {}):
-                others = hosts.get(mname) or []
-                if len(others) == 1:
-                    claimed.add((others[0], mname))
-                    findings.append(_wrong_host(name, tname, others[0], mname))
+            for mname, m in (body.get("measures") or {}).items():
+                others = sorted(hosts.get(mname) or [])
+                if others:
+                    for t in others:
+                        claimed.add((t, mname))
+                    findings.append(_wrong_host(
+                        name, tname, others[0], mname,
+                        _same_body(model, others[0], mname, m)))
             continue
         derived = live["tables"][tname]
         for cname, props in (body.get("columns") or {}).items():
@@ -322,13 +336,13 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
             ref = f"{tname}[{mname}]"
             others = [t for t in (hosts.get(mname) or []) if t != tname]
             if mname not in derived["measures"]:
-                if len(others) == 1:
-                    claimed.add((others[0], mname))
-                    findings.append(_wrong_host(name, tname, others[0], mname))
-                elif others:
+                if others:
+                    others = sorted(others)
                     for t in others:
                         claimed.add((t, mname))
-                        findings.append(_duplicate_host(name, tname, t, mname))
+                    findings.append(_wrong_host(
+                        name, tname, others[0], mname,
+                        _same_body(model, others[0], mname, m)))
                 else:
                     findings.append(Finding(
                         kind="measure.missing", model=name, ref=ref,
@@ -350,6 +364,9 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                     template_value=_fmt_props(m["properties"]),
                     derived_value=_fmt_props(d["properties"]),
                     detail=f"measure {ref} properties differ from the template"))
+
+    # ── template-driven renames (one missing + one extra, same core) ──
+    findings = _pair_renames(name, fleet, baseline, model, findings)
 
     # ── shared expressions ──
     findings.extend(_expression_findings(name, fleet, baseline, model))
@@ -438,6 +455,7 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
     # ── retirements (ledger-proven), with the coupling guard ──
     findings.extend(_retirements(name, model, live, baseline, retire))
     findings.extend(_stranded_refs(name, model, ledger))
+    findings = drop_paired_extras(findings)
 
     # ── count floors against the template's captured metrics ──
     from .metrics import COUNT_KIND, count_floor_findings
@@ -452,6 +470,82 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                                 derived_value=str(data["client"]),
                                 detail=detail, data=data))
     return findings
+
+
+def _declared_divergent(fleet: Fleet, model: str, measure: str) -> bool:
+    for o in fleet.overrides.get(model) or []:
+        if o.kind in ("absent", "expression") and (
+                o.object == measure or o.object.endswith(f"[{measure}]")):
+            return True
+    return False
+
+
+def _pair_renames(name: str, fleet: Fleet, baseline: dict, model: Model,
+                  findings: list) -> list:
+    """Turn one ``measure.missing`` plus one derived-only measure sharing
+    its core name into a single ``measure.renamed`` (``old -> new``).
+    Ambiguous cores (two candidates on either side) are left as they are."""
+    from .renames import DEFAULT_EXCLUDE, DEFAULT_SIGILS, core_name
+    conf = ((fleet.setting("renames") or {}).get("pairing") or {}) \
+        if isinstance(fleet.setting("renames"), dict) else {}
+    sigils = tuple(conf.get("prefix_sigils") or DEFAULT_SIGILS)
+    exclude = tuple(conf.get("exclude_prefixes") or DEFAULT_EXCLUDE)
+    template_names = {m for body in (baseline.get("tables") or {}).values()
+                      for m in (body.get("measures") or {})}
+    missing = {split_ref(f.ref)[1]: f for f in findings
+               if f.kind == "measure.missing"}
+    hosts = model.measure_hosts()
+    extra = [m for m in hosts if m not in template_names
+             and len(hosts[m]) == 1]
+
+    def usable(n):
+        return not any(n.startswith(p) for p in exclude)
+
+    by_core: dict = {}
+    for n in missing:
+        if usable(n):
+            by_core.setdefault(core_name(n, sigils), [[], []])[0].append(n)
+    for n in extra:
+        if usable(n):
+            by_core.setdefault(core_name(n, sigils), [[], []])[1].append(n)
+    drop_missing, drop_extra, out = set(), set(), []
+    for core, (miss, ext) in sorted(by_core.items()):
+        if len(miss) != 1 or len(ext) != 1 or miss[0] == ext[0]:
+            continue
+        new, old = miss[0], ext[0]
+        if _declared_divergent(fleet, name, new):
+            continue
+        tmpl = split_ref(missing[new].ref)[0]
+        host = hosts[old][0]
+        drop_missing.add(new)
+        drop_extra.add(f"{host}[{old}]")
+        out.append(Finding(
+            kind="measure.renamed", model=name, ref=f"{old} -> {new}",
+            template_value=new, derived_value=old,
+            detail=(f"the template renamed measure '{old}' to '{new}' "
+                    f"(same core name); the fix renames '{name}''s "
+                    f"declaration on '{host}' and rewrites its DAX and "
+                    f"report references"),
+            data={"old": old, "new": new, "host": host,
+                  "template_table": tmpl}))
+    if not out:
+        return findings
+    kept = [f for f in findings
+            if not (f.kind == "measure.missing"
+                    and split_ref(f.ref)[1] in drop_missing)]
+    return kept + out
+
+
+def drop_paired_extras(findings: list) -> list:
+    """Remove the ``extra.measure`` (and ``retire.measure``) findings a
+    rename explains: the old name is renamed, never removed."""
+    explained = {(f.model, f.data.get("host"), f.data.get("old"))
+                 for f in findings if f.kind == "measure.renamed"}
+    if not explained:
+        return findings
+    return [f for f in findings if not (
+        f.kind in ("extra.measure", "retire.measure")
+        and (f.model, *split_ref(f.ref)) in explained)]
 
 
 def _none_or_str(v):
@@ -666,14 +760,24 @@ def _own_work_on_table(model: Model, baseline: dict, retire: dict,
     return []
 
 
-def _wrong_host(model: str, host: str, found_on: str, mname: str) -> Finding:
+def _same_body(model: Model, table: str, mname: str, template: dict) -> bool:
+    m = model.measure(table, mname)
+    return m is not None and normalize_expression(m.expression) == \
+        (template or {}).get("expression")
+
+
+def _wrong_host(model: str, host: str, found_on: str, mname: str,
+                same_body: bool = True) -> Finding:
+    body = ("the body matches the template" if same_body
+            else "the body also differs from the template")
     return Finding(
         kind="measure.wrong_host", model=model, ref=f"{host}[{mname}]",
         template_value=host, derived_value=found_on,
         detail=(f"'{model}' carries measure '{mname}' on '{found_on}', but "
-                f"the template hosts it on '{host}'. The fix moves the block "
-                f"verbatim (DAX and lineage tag untouched); measure names "
-                f"are model-global, so it is never inserted a second time"),
+                f"the template hosts it on '{host}'; {body}. The fix moves "
+                f"the block verbatim (DAX and lineage tag untouched); measure "
+                f"names are model-global, so it is never inserted a second "
+                f"time"),
         data={"from_table": found_on, "to_table": host, "measure": mname})
 
 
@@ -682,9 +786,9 @@ def _duplicate_host(model: str, host: str, extra: str, mname: str) -> Finding:
         kind="measure.duplicate_host", model=model, ref=f"{extra}[{mname}]",
         template_value=host, derived_value=extra,
         detail=(f"'{model}' carries measure '{mname}' on '{extra}' as well "
-                f"as on another table; the template hosts it on '{host}'. "
-                f"Measure names are model-global, so the model will not "
-                f"load; remove the stale copy by hand (advisory)"),
+                f"as on '{host}', the template's host. Measure names are "
+                f"model-global, so the model will not load; the fix removes "
+                f"the stale copy on '{extra}'"),
         data={"template_host": host, "measure": mname})
 
 

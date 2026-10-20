@@ -99,8 +99,49 @@
   non-terminal run declines count under the new `skipped_noninteractive`
   counter (and in `skipped`).
 
+- **`measure.renamed`.** A missing template measure and a derived-only
+  measure that share a core name (the name with one leading `-`, `_`, `!`,
+  `#`, `^` or letter-and-dash stripped, trimmed, lower-cased) are reported
+  as one rename instead of a missing plus an extra (or a retirement). The
+  fix renames the derived declaration, rewrites DAX references in every
+  table file (field-parameter NAMEOF rows included) and, when
+  pbi-plot-styler is installed, every report binding below the model's
+  folder. Ambiguous cores and override-declared names are never paired.
+- **`drift-doctor rename measure OLD NEW`.** Renames a measure in the
+  template and every fleet model: picker labels whose NAMEOF points at it,
+  the declaration (any quoting), DAX references including text comparisons
+  inside string literals, and report bindings. A configured format-selector
+  table (`renames.format_table`) is checked for a precision loss; exit 2
+  until `--format-arm MODEL=FORMAT` resolves it.
+- **Rename map (`renames:` in fleet.yml).** `renames check` verifies every
+  target exists in each model; `renames apply` rewrites references in
+  measure bodies, calculated columns, partition sources with or without
+  fences, calculation items and format-string definitions, and column
+  endpoints in relationships.tmdl. Per-model `rename_profile`.
+  `tmdl_drift_doctor.renames.rewrite_measure_references(path, map)` is the
+  one-file entry point.
+- **`remediate --ref NAME [--add-missing]`.** Pushes exactly the named
+  template measures to every model, editing each model's own host table
+  and keeping its lineage tag; override-declared models are skipped; an
+  unknown name exits 2 before anything is written.
+- **`measure.duplicate_host` is fixable.** The stale copy on the other
+  table is removed (the copy on the template's host stays). It is no longer
+  advisory; allowlist the kind to apply it.
+- **Table copies register their query order.** `table.missing` appends a
+  Power Query table to the model's `PBI_QueryOrder` annotation (calculated
+  tables and models without the annotation are left alone); a table
+  removal drops the entry and the quoted or bare `ref table` line.
+- **Missing axis tables always gate.** A missing `x-Selector`,
+  `x-Plot Specific`, `y-Selector` or `y-Plot Specific` table fails `detect`
+  whatever `allowlist.kinds` says (writing it still needs the allowlist).
+
 ### Changed
 
+- **`measure.wrong_host` is one finding per measure.** A template measure
+  missing from its host but present on several other tables is one move
+  from the alphabetically first of them (it used to be a duplicate-host
+  finding per table), and the detail says whether the body matches the
+  template.
 - **`remediate` without a terminal applies nothing (breaking).** When
   stdin is not a terminal, questions are disabled, every item is reported
   as skipped ("non-interactive") and nothing is written, unless `--yes` is
