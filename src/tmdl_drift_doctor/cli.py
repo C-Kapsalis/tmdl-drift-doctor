@@ -632,16 +632,16 @@ def ratchet_check(fleet_path, from_json, allow_stale, total_only,
         _refuse([f"no floors file at {fleet.floors_path}; seed it with "
                  f"`drift-doctor ratchet tighten` and commit it"])
     _refuse_retirement_allowance(floors)
-    if include_advisory:
-        for body in (report.get("models") or {}).values():
-            for f in body.get("findings") or ():
-                if f.get("kind", "").startswith("retire."):
-                    f["remediable"] = True
-    res = check(report, floors, fleet.gating)
+    res = check(report, floors, fleet.gating, include_advisory=include_advisory)
     if res.resurrected:
         click.echo("RESURRECTION — ledger-retired objects are back (hard "
                    "zero, never floored):")
         for line in res.resurrected:
+            click.echo(f"  {line}")
+    if res.unremediable:
+        click.echo("RETIREMENT REPORTED (no sync can apply it; it does not "
+                   "fail the check):")
+        for line in res.unremediable:
             click.echo(f"  {line}")
     for line in res.violations:
         click.echo(f"[RISE] {line}")
@@ -656,7 +656,7 @@ def ratchet_check(fleet_path, from_json, allow_stale, total_only,
         click.echo(f"note: {line}")
     for line in res.info:
         click.echo(f"  {line}")
-    if not res.resurrected:
+    if not res.resurrected and not res.unremediable:
         click.echo("no ledger-retired object resurrected")
     if res.resurrected:
         click.echo("DRIFT RATCHET RED — RESURRECTION")

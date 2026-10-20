@@ -346,6 +346,13 @@
 
 ### Fixed
 
+- **A retirement no sync can apply is now named.** The ratchet counts the
+  findings a sync could act on, so a retirement kind that no sync can apply
+  was not printed at all: a report said nothing about an object the ledger
+  proves was retired from the template and that is back in a derived model.
+  Every retirement finding is now named in the `ratchet check` output, under
+  a `RETIREMENT REPORTED` block. Such a finding does not fail the check
+  unless `--include-advisory` is given, which makes it fail.
 - **A floors file that grants a retirement allowance is refused, not
   reported as a rise.** Resurrections are hard zero, so a floor may never
   license one, and the tool never writes such a key: one in the file is a

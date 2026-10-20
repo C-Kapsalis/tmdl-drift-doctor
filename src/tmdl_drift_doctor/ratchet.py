@@ -119,15 +119,26 @@ def counts(report: dict) -> dict:
 
 
 def resurrections(report: dict) -> dict:
-    """{model: [finding]} for every remediable ``retire.*`` finding."""
+    """{model: [finding]} for every ``retire.*`` finding.
+
+    A retirement the sync cannot act on is still a retirement: the object
+    the ledger proves was retired from the template is back in a derived
+    model, and nobody must learn that from a report that says nothing. So
+    every retirement finding is collected here, and the caller decides
+    which of them fail the check.
+    """
     out = {}
     for name, body in (report.get("models") or {}).items():
         hits = [f for f in (body or {}).get("findings") or ()
-                if head(f.get("kind") or "") == HARD_ZERO
-                and f.get("remediable", True)]
+                if head(f.get("kind") or "") == HARD_ZERO]
         if hits:
             out[name] = hits
     return out
+
+
+def _remediable(hits: list) -> list:
+    """The findings a sync could act on."""
+    return [f for f in hits if f.get("remediable", True)]
 
 
 # ───────────────────────── floors file ─────────────────────────
@@ -185,6 +196,7 @@ class CheckResult:
     improved: list = field(default_factory=list)
     notes: list = field(default_factory=list)
     info: list = field(default_factory=list)
+    unremediable: list = field(default_factory=list)  # named, never fatal
 
     @property
     def ok(self) -> bool:
@@ -198,15 +210,19 @@ def _gating(report: dict, gating: dict, name: str) -> str:
         "gating", "enforced")
 
 
-def check(report: dict, floors_doc: dict, gating: dict) -> CheckResult:
+def check(report: dict, floors_doc: dict, gating: dict,
+          include_advisory: bool = False) -> CheckResult:
     res = CheckResult()
     floors = floors_doc.get("models") or {}
     current = counts(report)
     raised = resurrections(report)
     for name in sorted(current):
         advisory = _gating(report, gating, name) == "advisory"
+        hits = raised.get(name, ())
+        remediable = _remediable(hits)
+        unremediable = [f for f in hits if not f.get("remediable", True)]
         block = []
-        for f in raised.get(name, ()):
+        for f in remediable:
             block.append(f"{name}: {f['kind']} {f['ref']}")
         if block:
             block.append(f"{name}: cascade it with `drift-doctor remediate "
@@ -234,12 +250,24 @@ def check(report: dict, floors_doc: dict, gating: dict) -> CheckResult:
             kinds = ", ".join(f"{k} {v}" for k, v in cur["by_kind"].items()
                               if head(k) == h)
             res.info.append(f"{name}: {h} {n} ({kinds})")
+        if unremediable:
+            # A retirement no sync can act on is still a retirement: it is
+            # named, so nobody learns about it from a report that says
+            # nothing. It fails only when the caller opts in.
+            res.unremediable.extend(
+                f"{name}: {f['kind']} {f['ref']} (no sync can apply this "
+                f"retirement; it is reported, not failed)"
+                for f in unremediable)
         if advisory:
             res.advisories.extend(("RESURRECTION " + b) for b in block)
             res.advisories.extend(found)
         else:
             res.resurrected.extend(block)
             res.violations.extend(found)
+    if include_advisory:
+        # The opt-in: a retirement no sync can act on now fails too.
+        res.resurrected.extend(res.unremediable)
+        res.unremediable = []
     scope = report.get("scope")
     unseen = sorted(set(floors) - set(current))
     if scope is not None and not scope.get("fleet"):
