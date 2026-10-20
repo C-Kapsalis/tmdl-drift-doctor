@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "models": {
+    "north-store": {
+      "applied": [
+        {"kind": "measure.missing", "ref": "Store Measures[Repair Revenue]"},
+        {"kind": "column.missing", "ref": "Orders[discount]"}
+      ],
+      "generated_at": "2026-09-01T08:00:00+00:00",
+      "template_tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    },
+    "south-store": {
+      "applied": [
+        {"kind": "measure.expression_drift", "ref": "Store Measures[Bikes Sold]"}
+      ],
+      "generated_at": "2026-08-15T17:30:00+00:00",
+      "template_tree": "9d3a1f0c5e7b2a4c6d8e0f1a3b5c7d9e1f2a4b6c"
+    }
+  }
+}

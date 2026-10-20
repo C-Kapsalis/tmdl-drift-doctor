@@ -1,0 +1,14 @@
+table Sales
+	lineageTag: 6f0c1a2e-0000-4000-8000-000000000001
+
+	measure 'Total Sales' = SUM(Sales[amount])
+		lineageTag: 6f0c1a2e-0000-4000-8000-000000000002
+
+	column amount
+		dataType: double
+		lineageTag: 6f0c1a2e-0000-4000-8000-000000000003
+		sourceColumn: amount
+
+	partition Sales = m
+		mode: import
+		source = #table({"amount"}, {{1.0}})

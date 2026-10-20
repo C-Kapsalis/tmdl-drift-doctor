@@ -1,0 +1,15 @@
+# Stand-in fleet (fictional bike-shop models) for the ratchet/advisory port.
+version: 1
+template: template/Performance.SemanticModel
+models:
+  spinout-10: spinout_10_db/Growth.SemanticModel
+  spinout-02: spinout_02_db/Growth.SemanticModel
+  pilot:
+    path: pilot_db/Pilot.SemanticModel
+    gating: advisory
+    gating_reason: pilot bike-shop model is still being aligned to the template; re-gate once its relationships match
+state_dir: .drift-doctor
+allowlist:
+  kinds:
+    - measure.missing
+    - column.missing

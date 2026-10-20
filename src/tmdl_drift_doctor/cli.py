@@ -389,6 +389,10 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
         click.echo(f"[decision] {d['model']}: {d['kind']} {d['name']} — "
                    f"{d['note']}")
     if not dry_run:
+        from .receipt import write_sync_receipt
+        from .remediate import RunResult as _RR
+        merged = _RR(outcomes=[o for r in results for o in r.outcomes])
+        write_sync_receipt(fleet.state_dir, merged, template=fleet.template)
         from .enrichment import aggregate, notify, write_report
         entries = aggregate([n for r in results for n in r.notices])
         if entries:
@@ -547,19 +551,52 @@ _allow_stale = click.option("--allow-stale", is_flag=True,
                             help="Detect on a stale baseline.")
 
 
+_total_only = click.option(
+    "--total-only", is_flag=True,
+    help="Compare only each model's drift total (missing tables and "
+         "measures, expression drift, missing columns, missing and modified "
+         "relationships) with <state_dir>/drift_totals.json.")
+
+
 @ratchet.command("check")
 @_fleet_option
 @_from_json
 @_allow_stale
-def ratchet_check(fleet_path, from_json, allow_stale) -> None:
-    """Exit 1 if any model's actionable findings (total or per kind) rose
-    above its floor, or any retired object came back."""
-    from .ratchet import check, load_floors, report_problems
+@_total_only
+@click.option("--include-advisory", is_flag=True,
+              help="Also fail on retire.* findings that no sync can apply.")
+def ratchet_check(fleet_path, from_json, allow_stale, total_only,
+                  include_advisory) -> None:
+    """Exit 1 if any gated model's drift (total or per kind head) rose above
+    its floor, or any ledger-retired object came back (hard zero)."""
+    from .ratchet import TOTALS_FILE, check, load_floors, report_problems, totals
     fleet = _load(fleet_path)
     report = _ratchet_report(fleet, from_json, allow_stale)
     problems = report_problems(report, writing=False)
     if problems:
         _refuse(problems)
+    if total_only:
+        path = fleet.state_dir / TOTALS_FILE
+        if not path.exists():
+            _refuse([f"no totals file at {path}; record one with "
+                     f"`drift-doctor ratchet tighten --total-only`"])
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        recorded = doc.get("models", doc)
+        bad = []
+        for name, row in sorted(totals(report).items()):
+            if name not in recorded:
+                click.echo(f"{name}: skipped (no recorded total)")
+                continue
+            was = int(recorded[name].get("total", 0))
+            line = f"{name}: drift total {was} -> {row['total']}"
+            if row["total"] > was and fleet.gating.get(name) != "advisory":
+                bad.append(line)
+                click.echo(f"[RISE] {line}")
+            else:
+                click.echo(f"[ok] {line}")
+        if bad:
+            sys.exit(1)
+        return
     try:
         floors = load_floors(fleet.floors_path)
     except DriftDoctorError as e:
@@ -567,11 +604,21 @@ def ratchet_check(fleet_path, from_json, allow_stale) -> None:
     if floors is None:
         _refuse([f"no floors file at {fleet.floors_path}; seed it with "
                  f"`drift-doctor ratchet tighten` and commit it"])
+    if include_advisory:
+        for body in (report.get("models") or {}).values():
+            for f in body.get("findings") or ():
+                if f.get("kind", "").startswith("retire."):
+                    f["remediable"] = True
     res = check(report, floors, fleet.gating)
+    if res.resurrected:
+        click.echo("RESURRECTION — ledger-retired objects are back (hard "
+                   "zero, never floored):")
+        for line in res.resurrected:
+            click.echo(f"  {line}")
     for line in res.violations:
         click.echo(f"[RISE] {line}")
     if res.advisories:
-        click.echo("advisory models (reported, never fail the check):")
+        click.echo("ADVISORY (reported, never fails the check):")
         for line in res.advisories:
             click.echo(f"  {line}")
     for line in res.improved:
@@ -579,43 +626,69 @@ def ratchet_check(fleet_path, from_json, allow_stale) -> None:
                    f"tighten`)")
     for line in res.notes:
         click.echo(f"note: {line}")
-    if res.ok:
-        click.echo("ratchet: every gated model is at or below its floor.")
-    else:
+    for line in res.info:
+        click.echo(f"  {line}")
+    if not res.resurrected:
+        click.echo("no ledger-retired object resurrected")
+    if res.resurrected:
+        click.echo("DRIFT RATCHET RED — RESURRECTION")
         sys.exit(1)
+    if res.violations:
+        click.echo("DRIFT RATCHET RED")
+        sys.exit(1)
+    click.echo("ratchet: every gated model is at or below its floor.")
 
 
 @ratchet.command("tighten")
 @_fleet_option
 @_from_json
 @_allow_stale
+@_total_only
 @click.option("--allow-new", is_flag=True,
               help="Record models that have no floor yet at their current "
                    "counts.")
 @click.option("--prune", is_flag=True,
-              help="Drop floors of models no longer in fleet.yml.")
-def ratchet_tighten(fleet_path, from_json, allow_stale, allow_new, prune) -> None:
-    """Lower every floor to min(floor, current). Never raises a floor.
-    Only a full-fleet, unfiltered, error-free report is accepted."""
-    from .ratchet import load_floors, report_problems, save_floors, tighten
+              help="Drop floors of models no longer in the fleet (fleet "
+                   "reports only).")
+def ratchet_tighten(fleet_path, from_json, allow_stale, total_only, allow_new,
+                    prune) -> None:
+    """Lower every floor to min(floor, current). Never raises a floor. A
+    model-scoped report lowers only its own models' floors."""
+    from .ratchet import (TOTALS_FILE, allowances, load_floors,
+                          report_problems, save_floors, tighten, totals)
     fleet = _load(fleet_path)
     report = _ratchet_report(fleet, from_json, allow_stale)
-    problems = report_problems(report, writing=True)
+    problems = report_problems(report, writing=True, prune=prune)
     if problems:
         _refuse(problems)
+    if total_only:
+        path = fleet.state_dir / TOTALS_FILE
+        doc = {"models": totals(report)}
+        path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8")
+        click.echo(f"drift totals written: {path}")
+        return
     try:
         floors = load_floors(fleet.floors_path)
     except DriftDoctorError as e:
         _refuse([str(e)])
-    doc, changes = tighten(report, floors, allow_new=allow_new, prune=prune,
-                           fleet_models=list(fleet.models))
+    if floors is not None and allowances(floors):
+        for name, value in allowances(floors):
+            click.echo(f"ERROR: {name}: the floors file grants a retire "
+                       f"allowance (retire: {value}); remove it and remediate "
+                       f"the model instead", err=True)
+        sys.exit(1)
+    doc, changes, notes = tighten(report, floors, allow_new=allow_new,
+                                  prune=prune, fleet_models=list(fleet.models))
     for line in changes:
         click.echo(f"  {line}")
-    if floors is None or doc["models"] != floors.get("models"):
-        save_floors(fleet.floors_path, doc)
-        click.echo(f"floors written: {fleet.floors_path}")
-    else:
+    for line in notes:
+        click.echo(f"note: {line}")
+    if doc is None:
         click.echo("floors unchanged.")
+        return
+    save_floors(fleet.floors_path, doc)
+    click.echo(f"floors written: {fleet.floors_path}")
 
 
 # ───────────────────────────── audit / review ─────────────────────────────

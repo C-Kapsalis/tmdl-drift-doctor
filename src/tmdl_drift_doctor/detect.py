@@ -366,7 +366,11 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                         _same_body(model, others[0], mname, m)))
             continue
         derived = live["tables"][tname]
+        ignore_cols = set(fleet.setting("ignore_columns") or [])
+        skip_expr = tuple(fleet.setting("expression_drift_ignore") or ())
         for cname, props in (body.get("columns") or {}).items():
+            if cname in ignore_cols:
+                continue
             ref = f"{tname}[{cname}]"
             if cname not in derived["columns"]:
                 findings.append(Finding(
@@ -398,6 +402,8 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                 claimed.add((t, mname))
                 findings.append(_duplicate_host(name, tname, t, mname))
             d = derived["measures"][mname]
+            if skip_expr and mname.startswith(skip_expr):
+                continue
             if d["expression"] != m["expression"]:
                 findings.append(Finding(
                     kind="measure.expression_drift", model=name, ref=ref,
@@ -485,7 +491,8 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
             ref = f"{tname}[{cname}]"
             if cname in (b_tables[tname].get("columns") or {}):
                 continue
-            if ("column", ref) in retire:
+            if ("column", ref) in retire or cname in set(
+                    fleet.setting("ignore_columns") or []):
                 continue
             findings.append(Finding(
                 kind="extra.column", model=name, ref=ref,
@@ -514,6 +521,9 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
     findings.extend(_stranded_refs(name, model, ledger))
     findings = drop_paired_extras(findings)
 
+    # ── source-divergent tables: their own extras are acknowledged ──
+    _acknowledge_divergent(name, fleet, baseline, model, findings)
+
     # ── field-parameter tables ──
     from .fieldparams import fieldparam_findings
     findings.extend(fieldparam_findings(name, fleet, model))
@@ -531,6 +541,33 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                                 derived_value=str(data["client"]),
                                 detail=detail, data=data))
     return findings
+
+
+def _acknowledge_divergent(name: str, fleet: Fleet, baseline: dict,
+                           model: Model, findings: list) -> None:
+    """A table that reads the model's own source view may carry its own
+    columns and relationships: acknowledged once per table, never flagged.
+    Its missing columns still count."""
+    from .sources import divergent_tables
+    div = divergent_tables(fleet, baseline, name, model)
+    if not div:
+        return
+    for f in findings:
+        table = None
+        if f.kind == "extra.column":
+            table = split_ref(f.ref)[0]
+        elif f.kind == "relationship.extra":
+            from .tmdl import parse_signature
+            ft, _fc, tt, _tc = parse_signature(f.ref)
+            table = ft if ft in div else tt
+        if table in div:
+            f.override = Override(
+                model=name, object=table, kind="extension",
+                reason=(f"'{table}' reads the model's own source view "
+                        f"'{div[table][1]}' (the template reads "
+                        f"'{div[table][0]}'); its own columns and "
+                        f"relationships are acknowledged"),
+                section="source_divergent")
 
 
 def _declared_divergent(fleet: Fleet, model: str, measure: str) -> bool:
@@ -951,7 +988,8 @@ def finding_files(fleet: Fleet, f: Finding) -> list:
 def apply_overrides(fleet: Fleet, findings: list) -> list:
     from .overrides import match_override
     for f in findings:
-        f.override = match_override(fleet, f)
+        if f.override is None:
+            f.override = match_override(fleet, f)
         if f.override is None and f.model in fleet.models \
                 and fleet.exempt_patterns(f.model):
             for rel in finding_files(fleet, f):
@@ -1077,8 +1115,16 @@ def build_report(fleet: Fleet, findings: list, errors: list,
         "schema_version": JSON_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "template_tree": git_tree_hash(fleet.template),
-        "scope": {"fleet": model_filter is None, "models": names,
-                  "kind_filter": kind_filter},
+        "scope": {"fleet": model_filter is None,
+                  "models": None if model_filter is None else names,
+                  "alternate_model": (
+                      fleet.models[model_filter].name
+                      if model_filter and fleet.entry_of.get(
+                          model_filter, model_filter) != model_filter
+                      else None),
+                  "targets": list(names),
+                  "kind_filter": kind_filter,
+                  "overrides": None},
         "errors": list(errors),
         "models": models,
     }

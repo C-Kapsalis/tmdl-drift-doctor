@@ -1,0 +1,25 @@
+{
+  "models": {
+    "pilot": {
+      "by_category": {
+        "column": 41
+      },
+      "total": 41
+    },
+    "spinout-10": {
+      "by_category": {
+        "column": 2,
+        "measure": 3
+      },
+      "total": 5
+    },
+    "spinout-02": {
+      "by_category": {},
+      "total": 0
+    }
+  },
+  "policy": "floors only go down; raising one is a reviewed edit",
+  "template_tree": null,
+  "updated_at": "2026-10-01T00:00:00+00:00",
+  "version": 2
+}

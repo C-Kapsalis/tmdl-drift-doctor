@@ -21,8 +21,10 @@ def test_json_v2_shape(fleet_dir):
     assert report["schema_version"] == 2
     assert report["generated_at"]
     assert "template_tree" in report          # null outside a git work tree
-    assert report["scope"] == {"fleet": True, "models": ["alpha", "bravo"],
-                               "kind_filter": None}
+    assert report["scope"] == {"fleet": True, "models": None,
+                               "alternate_model": None,
+                               "targets": ["alpha", "bravo"],
+                               "kind_filter": None, "overrides": None}
     assert report["errors"] == []
     alpha = report["models"]["alpha"]
     assert alpha["gating"] == "enforced"
@@ -40,7 +42,10 @@ def test_json_scope_records_filters(fleet_dir):
     report = json.loads(_cli(fleet_dir, "detect", "--json", "--model", "bravo",
                              "--kind", "relationship.").output)
     assert report["scope"] == {"fleet": False, "models": ["bravo"],
-                               "kind_filter": "relationship."}
+                               "alternate_model": None,
+                               "targets": ["bravo"],
+                               "kind_filter": "relationship.",
+                               "overrides": None}
 
 
 def test_not_allowlisted_findings_do_not_fail_detect(fleet_dir):

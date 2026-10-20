@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "model": "spinout-10",
+      "model_path": "spinout_10_db/Growth.SemanticModel",
+      "table": "Google Play Installs",
+      "template_view": "google_play_installs_simple_n",
+      "model_view": "google_play_installs_n",
+      "columns": [
+        {
+          "name": "report_name",
+          "sourceColumn": "report_name"
+        }
+      ],
+      "measures_applied": []
+    }
+  ]
+}

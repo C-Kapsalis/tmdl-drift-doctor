@@ -4,6 +4,39 @@
 
 ### Added
 
+- **The ratchet counts by category head.** A floor is a `total` plus a count
+  per head (the text before the first dot: `measure.missing` and
+  `measure.expression_drift` both roll up to `measure`). What counts is every
+  finding a sync could act on, whatever `allowlist.kinds` says, minus
+  overridden findings, advisory and report-only kinds, and model-intrinsic
+  regenerations (`ifilter.*`, `visibility.*`, `ffilter.coverage_gap`). The
+  allowlist decides what `remediate` writes, never what the ratchet counts.
+  A legacy floors file keyed by kind is read as-is and rolled up on load;
+  `tighten` rewrites it in head form.
+- **The ratchet trusts its report.** `detect --json` records what the run
+  covered in a `scope` block (`fleet`, `models`, `alternate_model`,
+  `targets`, `kind_filter`, `overrides`). `ratchet check` refuses a
+  category-filtered report, a report with detection errors, and (when
+  writing) a run against an alternate model or a non-default overrides
+  file. `ratchet tighten` also refuses a report with no scope block, and
+  `--prune` needs a fleet report. A report with no scope block is still
+  accepted by `check`, compared as it stands, with no prune suggestion.
+- **`ratchet tighten` on a scoped report** lowers only the models it
+  names; the other floors are carried forward byte for byte.
+- **A resurrection is a hard zero.** A `retire.*` finding is never floored
+  and always fails, in its own `RESURRECTION` block, by name, with the
+  banner `DRIFT RATCHET RED — RESURRECTION`. A floors file that grants a
+  `retire` allowance is itself refused. `--include-advisory` extends the
+  hard zero to a retirement the sync cannot apply.
+- **`ratchet check|tighten --total-only`** compare each model's drift total
+  with `<state_dir>/drift_totals.json` (written by `tighten --total-only`),
+  a separate mode from the head ratchet.
+- **The sync receipt.** After a `remediate` run that applied something,
+  `<state_dir>/last_sync.json` records, per model, what was applied
+  (`kind` and `ref`) with that model's own stamps. Models the run did not
+  touch keep their entries verbatim, so a one-model run never re-attests the
+  rest of the fleet. A run that applied nothing leaves the file
+  byte-identical.
 - **`expression.missing`.** Every expression the template declares and a
   model does not is reported, whether or not the name is listed under
   `allowlist.expressions` (that list only scopes content comparison).
@@ -256,6 +289,16 @@
 
 ### Changed
 
+- **The ratchet reports in its own words.** A rise prints `TOTAL rose A ->
+  B` and `category '<head>' rose A -> B` (it used to print the per-kind
+  names), advisory models print under an `ADVISORY` heading, and a clean
+  run prints `no ledger-retired object resurrected` next to the per-model
+  status. The failure banner is `DRIFT RATCHET RED`.
+- **A source-divergent table keeps its own columns.** A table that reads
+  the model's own source view (rather than the template's) is
+  acknowledged once: its own columns and relationships are not reported
+  as extras, with the reason in the finding's override. Its missing
+  columns still count.
 - **`measure.wrong_host` is one finding per measure.** A template measure
   missing from its host but present on several other tables is one move
   from the alphabetically first of them (it used to be a duplicate-host

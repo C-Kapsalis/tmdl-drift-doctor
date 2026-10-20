@@ -35,9 +35,10 @@ def test_check_requires_floors(fleet_dir):
 
 def test_seed_then_check_passes(fleet_dir):
     floors = _seeded(fleet_dir)
-    assert floors["models"]["alpha"]["by_kind"]["measure.missing"] == 1
+    assert floors["version"] == 2
+    assert floors["models"]["alpha"]["by_category"]["measure"] >= 1
     # advisories never count
-    assert "extra.measure" not in floors["models"]["alpha"]["by_kind"]
+    assert "extra" not in floors["models"]["alpha"]["by_category"]
     r = _cli(fleet_dir, "ratchet", "check")
     assert r.exit_code == 0, r.output
 
@@ -50,8 +51,9 @@ def test_a_rise_fails_and_tighten_never_raises(fleet_dir):
               "measure 'Total Visits' = COUNTROWS(Visits) + 0")
     r = _cli(fleet_dir, "ratchet", "check")
     assert r.exit_code == 1
-    assert "bravo: total rose" in r.output
-    assert "bravo: measure.expression_drift rose 0 -> 1" in r.output
+    assert "bravo: TOTAL rose" in r.output
+    assert "bravo: category 'measure' rose" in r.output
+    assert "DRIFT RATCHET RED" in r.output
     _cli(fleet_dir, "ratchet", "tighten")
     assert _floors(fleet_dir)["models"] == before["models"]
 
@@ -62,7 +64,7 @@ def test_tighten_lowers_after_remediation(fleet_dir):
     r = _cli(fleet_dir, "ratchet", "check")
     assert r.exit_code == 0 and "[improved] alpha" in r.output
     _cli(fleet_dir, "ratchet", "tighten")
-    assert "measure.missing" not in _floors(fleet_dir)["models"]["alpha"]["by_kind"]
+    assert "measure" not in _floors(fleet_dir)["models"]["alpha"]["by_category"]
 
 
 def test_resurrection_is_hard_zero(fleet_dir):
@@ -72,11 +74,13 @@ def test_resurrection_is_hard_zero(fleet_dir):
     _cli(fleet_dir, "capture")
     r = _cli(fleet_dir, "ratchet", "tighten")
     floors = _floors(fleet_dir)
-    assert not any(k.startswith("retire.") for m in floors["models"].values()
-                   for k in m["by_kind"])
+    assert not any(k == "retire" for m in floors["models"].values()
+                   for k in m["by_category"])
     r = _cli(fleet_dir, "ratchet", "check")
     assert r.exit_code == 1
-    assert "resurrection retire.measure Visits[Peak Hour Visits]" in r.output
+    assert "RESURRECTION" in r.output
+    assert "retire.measure Visits[Peak Hour Visits]" in r.output
+    assert "DRIFT RATCHET RED — RESURRECTION" in r.output
 
 
 def test_refuses_filtered_scoped_or_errored_reports(fleet_dir):
@@ -84,18 +88,22 @@ def test_refuses_filtered_scoped_or_errored_reports(fleet_dir):
     out = fleet_dir / "scoped.json"
     out.write_text(_cli(fleet_dir, "detect", "--json", "--model", "alpha").output)
     assert _cli(fleet_dir, "ratchet", "check", "--from-json", str(out)).exit_code == 0
+    # a scoped report may lower its own model's floor, never prune
     r = _cli(fleet_dir, "ratchet", "tighten", "--from-json", str(out))
-    assert r.exit_code == 2 and "model-scoped" in r.output
+    assert r.exit_code == 0, r.output
+    r = _cli(fleet_dir, "ratchet", "tighten", "--from-json", str(out),
+             "--prune")
+    assert r.exit_code == 2 and "--prune requires a FLEET dump" in r.output
 
     out.write_text(_cli(fleet_dir, "detect", "--json", "--kind", "measure.").output)
     r = _cli(fleet_dir, "ratchet", "check", "--from-json", str(out))
-    assert r.exit_code == 2 and "kind-filtered" in r.output
+    assert r.exit_code == 2 and "category-filtered" in r.output
 
     report = json.loads(_cli(fleet_dir, "detect", "--json").output)
     report["errors"] = [{"model": "bravo", "error": "boom"}]
     out.write_text(json.dumps(report))
     r = _cli(fleet_dir, "ratchet", "tighten", "--from-json", str(out))
-    assert r.exit_code == 2 and "detection errors" in r.output
+    assert r.exit_code == 2 and "provider error" in r.output
 
 
 def test_advisory_models_never_fail_the_check(fleet_dir):
@@ -108,7 +116,8 @@ def test_advisory_models_never_fail_the_check(fleet_dir):
               "measure 'Total Visits' = COUNTROWS(Visits) + 0")
     r = _cli(fleet_dir, "ratchet", "check")
     assert r.exit_code == 0, r.output
-    assert "advisory models" in r.output and "bravo: total rose" in r.output
+    assert "ADVISORY" in r.output and "bravo: TOTAL rose" in r.output
+    assert "DRIFT RATCHET RED" not in r.output
 
 
 def test_new_model_needs_allow_new_and_prune_drops_old(fleet_dir):
