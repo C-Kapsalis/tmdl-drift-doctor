@@ -55,6 +55,8 @@ REMEDIABLE_KINDS = (
     "expression.drift",
     "expression.missing",
     "mapping_row.missing",
+    "mapping_category.missing",
+    "category_annotation.undeclared",
     "relationship.missing",
     "relationship.modified",
     "relationship.casing_mismatch",
@@ -67,6 +69,7 @@ REMEDIABLE_KINDS = (
     "retire.column",
     "retire.measure",
     "retire.mapping_row",
+    "retire.mapping_category",
     "retire.relationship",
 )
 
@@ -82,14 +85,16 @@ def is_remediable(kind: str) -> bool:
 
 # Kinds that only inform, never remediated: deleting or relocating a derived
 # model's own work is a human decision, full stop.
-ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra")
+ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra",
+                  "extra.mapping_row")
 
 # Kinds detection offers only in --sync mode (the purge channel).
 SYNC_ONLY_KINDS = ()
 
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
-                            "retire.mapping_row", "retire.relationship")
+                            "retire.mapping_row", "retire.mapping_category",
+                            "retire.relationship")
 
 # Kinds that fail a gate whatever `allowlist.kinds` says: a model that lost
 # a whole axis table, or live DAX naming a retired table, is never backlog.
@@ -400,6 +405,11 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                             f"'{name}' table '{tname}'"),
                     data={"table": tname, "row_key": key, "row": tuple_text}))
 
+    # ── encoded mapping tables ──
+    from .mappings import merge_findings
+    findings.extend(merge_findings(name, fleet, baseline,
+                                   fleet.model_definition(name)))
+
     # ── relationships (template -> derived), matched on field signature ──
     b_rels = baseline.get("relationships") or {}
     by_folded = {sig.casefold(): sig for sig in model.relationships}
@@ -469,6 +479,9 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
 
     # ── retirements (ledger-proven), with the coupling guard ──
     findings.extend(_retirements(name, model, live, baseline, retire))
+    from .mappings import retirement_findings
+    findings.extend(retirement_findings(name, fleet, model.definition,
+                                        retire))
     findings.extend(_stranded_refs(name, model, ledger))
     findings = drop_paired_extras(findings)
 
@@ -730,7 +743,7 @@ def _retirements(name: str, model: Model, live: dict, baseline: dict,
 
     # retired mapping rows still present in the derived model
     for (kind, ref), _event in retire.items():
-        if kind != "mapping_row":
+        if kind != "mapping_row" or _event.get("category"):
             continue
         tname, key = ref.rsplit("/", 1)
         if key in live["mapping_rows"].get(tname, {}):
@@ -863,11 +876,14 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
             f"unknown model '{model_filter}'; fleet.yml defines: "
             f"{', '.join(fleet.models)}")
     findings: list = []
+    from .annotations import findings as annotation_findings
+    cache: dict = {}
     for name in fleet.models:
         if model_filter and name != model_filter:
             continue
         try:
             findings.extend(detect_model(name, fleet, baseline, ledger))
+            findings.extend(annotation_findings(name, fleet, cache))
         except DriftDoctorError as e:
             if errors is None:
                 raise
@@ -947,7 +963,8 @@ def _fmt_rel(props: dict) -> str:
 def _live_view(model: Model, mapping_tables: list) -> dict:
     """The same comparable shape build_snapshot produces, from a live parse."""
     from .baseline import build_snapshot
-    snap = build_snapshot(model, mapping_tables, with_metrics=False)
+    snap = build_snapshot(model, mapping_tables, with_metrics=False,
+                          encoded=False)
     return {
         "tables": snap["tables"],
         "expressions": model.expressions,

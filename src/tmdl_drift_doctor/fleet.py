@@ -72,6 +72,7 @@ SECTIONS = {
     "fieldparam_entries": ({"category", "entry", "reason"},
                            {"owner", "added"}, None),
     "mapping_rows": ({"category", "key", "reason"}, {"owner", "added"}, None),
+    "mapping_categories": ({"category", "reason"}, {"owner", "added"}, None),
     "files": ({"path", "reason"}, {"owner", "added"}, None),
 }
 
@@ -556,7 +557,8 @@ def load_fleet(path) -> Fleet:
               "model (a *.SemanticModel folder containing definition/). "
               "Check the paths — they resolve relative to the fleet file.")
 
-    fleet.mapping_tables = list(data.get("mapping_tables") or [])
+    from .mappings import table_names
+    fleet.mapping_tables = table_names(data.get("mapping_tables"))
     fleet.state_dir = (root / (data.get("state_dir") or ".drift-doctor")).resolve()
     fleet.allowlist_kinds = set(allow.get("kinds") or [])
     fleet.allowlist_expressions = set(allow.get("expressions") or [])

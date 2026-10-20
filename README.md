@@ -198,6 +198,10 @@ ledger. A retirement that derived work still depends on is refused: retire
 | `fieldparam.blank_row` | A legend field parameter lacks the template's "no legend" row, or it drifted | Append (or restore) the template's row; an arity mismatch is refused | allowlist |
 | `fieldparam.schema_modernize` / `fieldparam.schema_blocked` | A field-parameter table's columns differ from the template's | Rewrite the column blocks and remap the rows; a table with its own extra columns is `schema_blocked` and never touched | allowlist / report-only |
 | `fieldparam.dangling_row` | Live rows whose NAMEOF points at nothing (the calculated table fails to process) | Remove exactly those rows | allowlist |
+| `mapping_category.missing` / `mapping_row.missing` (encoded tables) | A template category, or a template row of a category the model has, is absent from an encoded mapping table | Re-encode with the model's rows first and the template rows appended; the write is verified and read back | allowlist |
+| `extra.mapping_row` | A model-only row in an encoded mapping table | Nothing: advisory | never remediated |
+| `retire.mapping_category` | A whole mapping category retired from the template | Remove its rows; `blocked` when the model added its own keys to it | allowlist **+ `--sync`** |
+| `category_annotation.undeclared` / `category_annotation.orphaned` | A model-only mapping category without a `Category_*` annotation in model.tmdl / an annotation naming no category | Add the annotation (value from git history, else `"<Category> metrics"`) / nothing: report-only | allowlist / report-only |
 | `relationship.missing` | Template relationship (matched on `From[col] -> To[col]`, never on its GUID) absent | Append the template's raw block, once both endpoint columns exist | allowlist |
 | `relationship.modified` | Same endpoints, different cardinality, direction, or active flag | Overwrite with the template's block, keeping the derived block name | allowlist |
 | `relationship.extra` | Derived-only relationship between two shared tables | Nothing: advisory | never remediated |
@@ -335,6 +339,7 @@ than a clean `detect`:
 | `rename measure OLD NEW` | Renames a measure in the template and every model: picker labels, the declaration, DAX references (text comparisons included) and report bindings; `--dry-run` first | 0, 1 when no model declares OLD, 2 on a precision loss without `--format-arm` |
 | `renames check` / `renames apply` | Checks that every `renames:` target exists in each model / rewrites references to the old names | 0 / 1 |
 | `remediate --ref NAME` | Pushes one template measure to every model where each hosts it (lineage tag kept, overrides honored); `--add-missing` inserts it where absent | 0 / 1 / 2 for an unknown name |
+| `mapping decode` / `mapping diff` / `mapping union` | Prints an encoded mapping table's rows per category / compares two tables' categories / writes the template rows plus the derived-only rows into a table | 0 / 2 on bad input |
 | `fieldparam retag --from A --to B --display D FILES` | Moves the named live field-parameter rows from category A to B (only the category literal changes); nothing is written unless every row is found | 0 / 1 |
 | `review --out REVIEW.md` | Writes a per-model checklist of everything routed to a human: blocked retirements, precondition skips, wrong or duplicate hosts, advisories, overrides in force | 0 |
 

@@ -57,6 +57,7 @@ class FileChange:
     path: Path
     old: Optional[str]
     new: Optional[str]
+    verify: Optional[Callable] = None    # read-back check after the write
 
     def diff(self) -> str:
         a = _as_text(self.old).splitlines(keepends=True)
@@ -243,6 +244,9 @@ def _apply_expression_missing(fleet: Fleet, f: Finding) -> tuple:
 
 
 def _apply_mapping_row_missing(fleet: Fleet, f: Finding) -> tuple:
+    if f.data.get("encoded"):
+        from .mappings import apply_row_missing
+        return apply_row_missing(fleet, f)
     derived, _ = _model_paths(fleet, f)
     table, row = f.data["table"], f.data["row_key"]
     d_file = _table_file(derived, table)
@@ -317,6 +321,9 @@ def _apply_retire_table(fleet: Fleet, f: Finding) -> tuple:
 
 
 def _apply_retire_mapping_row(fleet: Fleet, f: Finding) -> tuple:
+    if f.data.get("encoded"):
+        from .mappings import apply_retire_rows
+        return apply_retire_rows(fleet, f)
     derived, _ = _model_paths(fleet, f)
     table, row = f.data["table"], f.data["row_key"]
     d_file = _table_file(derived, table)
@@ -508,7 +515,25 @@ def _current_baseline(fleet: Fleet) -> dict:
     return load_baseline(fleet)
 
 
+def _apply_category_missing(fleet: Fleet, f: Finding) -> tuple:
+    from .mappings import apply_category_missing
+    return apply_category_missing(fleet, f)
+
+
+def _apply_retire_category(fleet: Fleet, f: Finding) -> tuple:
+    from .mappings import apply_retire_rows
+    return apply_retire_rows(fleet, f)
+
+
+def _apply_annotation(fleet: Fleet, f: Finding) -> tuple:
+    from .annotations import apply_undeclared
+    return apply_undeclared(fleet, f)
+
+
 APPLIERS: dict = {
+    "category_annotation.undeclared": _apply_annotation,
+    "mapping_category.missing": _apply_category_missing,
+    "retire.mapping_category": _apply_retire_category,
     "relationship.casing_mismatch": _apply_casing,
     "table.missing": _apply_table_missing,
     "column.missing": _apply_column,
@@ -740,7 +765,8 @@ PHASES = (
     "measure.wrong_host", "measure.duplicate_host",
     "measure.expression_drift", "measure.property_drift",
     "relationship.missing", "relationship.modified",
-    "relationship.casing_mismatch", "retire.relationship", "retire.measure", "retire.mapping_row",
+    "relationship.casing_mismatch", "retire.relationship", "retire.measure",
+    "retire.mapping_row", "retire.mapping_category",
     "retire.column", "retire.table",
 )
 
@@ -950,6 +976,12 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 else:
                     c.path.parent.mkdir(parents=True, exist_ok=True)
                     c.path.write_text(c.new, encoding="utf-8")
+                if c.verify is not None:
+                    try:
+                        c.verify(c.path)
+                    except DriftDoctorError:
+                        _restore(c)
+                        raise
             state.invalidate(f.model)
             state.record(f)
             if changes:
@@ -975,6 +1007,16 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
         else:
             result.backups_removed = backups.remove_all()
     return result
+
+
+def _restore(c: FileChange) -> None:
+    """Put a file back as it was before a write whose read-back failed."""
+    if c.old is None:
+        Path(c.path).unlink(missing_ok=True)
+    elif isinstance(c.old, bytes):
+        Path(c.path).write_bytes(c.old)
+    else:
+        Path(c.path).write_text(c.old, encoding="utf-8")
 
 
 class Backups:

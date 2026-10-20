@@ -12,7 +12,8 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `template` | path | required | The template `*.SemanticModel` folder. |
 | `models` | mapping | required | Fleet entries (see below). |
 | `state_dir` | path | `.drift-doctor` | Baseline, ledger, floors, receipts. |
-| `mapping_tables` | list of table names | `[]` | Tables whose rows are diffed row by row. |
+| `mapping_tables` | list of table names (or `{name, encoding}`) | `[]` | Tables whose rows are diffed row by row. A table whose partition calls `Binary.FromText` (Desktop's "Enter data") is decoded automatically; its rows are compared by (category, key). |
+| `category_annotations` | `{baseline, table, property_suffixes}` | none; the first mapping table; `_RequiredServices`, `_HealthPolicy` | `Category_*` annotations in model.tmdl must match the categories a model's mapping adds on top of the template's. `baseline` names a JSON file `{"orphaned": {<folder>/<model>: [...]}, "undeclared": {...}}` of accepted exceptions. |
 | `allowlist.kinds` | list of dotted prefixes | `[]` | Kinds `remediate` may apply. `measure` matches every `measure.*` kind; `measure.miss` matches nothing. Never decides what `detect` or the ratchet count. |
 | `allowlist.expressions` | list of names | `[]` | Shared expressions compared for content (`expression.drift`). Must not name a connection parameter. |
 | `connection_parameters` | list of names | `[]` | Expressions that hold per-model values. Reported by `expression.missing` with a hint, never written. |
@@ -50,6 +51,11 @@ An entry is a bare path or a mapping:
 | `rename_profile` | string | The `renames.profiles` entry this model uses. |
 
 ## Overrides
+
+Typed sections also include `mapping_rows` (`{category, key, reason}`: the
+model keeps a row the template retired) and `mapping_categories`
+(`{category, reason}`: the model deliberately lacks a template category).
+
 
 Every entry needs a non-empty `reason`; `owner` and `added` are optional.
 

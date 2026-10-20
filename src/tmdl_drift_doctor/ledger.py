@@ -35,11 +35,36 @@ from typing import Optional
 from . import DriftDoctorError
 
 RETIREMENT_KINDS = ("table", "column", "measure", "mapping_row",
-                    "relationship")
+                    "mapping_category", "relationship")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _check_event(path, line_no: int, event: dict) -> None:
+    """A retirement that authorizes a row removal must name its target."""
+    if event.get("event") != "retired":
+        return
+    kind = event.get("kind")
+    if kind == "mapping_row":
+        if "category" in event and not str(event.get("category") or ""):
+            missing = "category"
+        elif not str(event.get("row_key") or ""):
+            missing = "row_key"
+        else:
+            return
+    elif kind == "mapping_category":
+        if str(event.get("category") or ""):
+            return
+        missing = "category"
+    else:
+        return
+    raise DriftDoctorError(
+        f"{path}:{line_no}: a retired {kind} entry has no `{missing}`; the "
+        f"ledger authorizes removals, so an entry without its target stops "
+        f"every read. Repair the line or restore the file from version "
+        f"control.")
 
 
 class Ledger:
@@ -65,12 +90,14 @@ class Ledger:
         return self.append({"event": "retired", "kind": kind, "ref": ref, **extra})
 
     def record_revival(self, kind: str, ref: str, model: Optional[str] = None,
-                       source: str = "manual", note: str = "") -> dict:
+                       source: str = "manual", note: str = "",
+                       **extra) -> dict:
         event = {"event": "revived", "kind": kind, "ref": ref, "source": source}
         if model:
             event["model"] = model
         if note:
             event["note"] = note
+        event.update({k: v for k, v in extra.items() if v is not None})
         return self.append(event)
 
     def record_remediation(self, kind: str, model: str, ref: str,
@@ -89,7 +116,7 @@ class Ledger:
             if not line.strip():
                 continue
             try:
-                out.append(json.loads(line))
+                event = json.loads(line)
             except json.JSONDecodeError as e:
                 raise DriftDoctorError(
                     f"{self.path}:{i + 1}: malformed ledger line ({e}). The "
@@ -97,6 +124,8 @@ class Ledger:
                     f"every read rather than risk mis-targeting one. Repair "
                     f"that line or restore the file from version control, "
                     f"then retry.") from e
+            _check_event(self.path, i + 1, event)
+            out.append(event)
         return out
 
     def active_retirements(self, model: Optional[str] = None) -> dict:

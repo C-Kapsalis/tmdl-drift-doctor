@@ -151,6 +151,29 @@
   `fieldparam.dangling_row` (rows whose NAMEOF points at nothing).
   `drift-doctor fieldparam retag` moves rows between categories.
 
+- **Encoded mapping tables.** Mapping tables stored as Desktop "Enter data"
+  strings (`Binary.FromText` of raw-deflated JSON) are decoded
+  (`tmdl_drift_doctor.mapping_codec`), captured under `encoded_mapping`,
+  and compared by (category, key): `mapping_category.missing`,
+  `mapping_row.missing`, advisory `extra.mapping_row`, and the retirements
+  `retire.mapping_row` (only the retired keys go, siblings stay) and
+  `retire.mapping_category` (`blocked` when the model added its own keys).
+  `capture` records row retirements with `category` and `row_key`, a whole
+  category once (never its rows again), and stamps revivals with the
+  template tree. Every write is verified before it lands and read back
+  after it; a failed read-back restores the file. `drift-doctor mapping
+  decode|diff|union` inspect and merge tables. Typed override section
+  `mapping_categories`.
+- **Category annotations.** `category_annotation.orphaned` (report-only) and
+  `category_annotation.undeclared` (fix: add the annotation, valued from
+  git history or `"<Category> metrics"`; a name that cannot become a key is
+  left for a person) keep model.tmdl's `Category_*` annotations in step
+  with the categories a model adds to the template's mapping, with a
+  shrink-only baseline of accepted exceptions.
+- **The ledger refuses a retired mapping row without its target.** A
+  `mapping_row` retirement without `row_key` (or with an empty `category`)
+  stops every read.
+
 ### Changed
 
 - **`measure.wrong_host` is one finding per measure.** A template measure

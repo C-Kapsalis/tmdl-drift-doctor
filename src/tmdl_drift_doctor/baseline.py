@@ -30,13 +30,14 @@ from pathlib import Path
 from . import StaleBaselineError, __version__
 from .fleet import Fleet
 from .ledger import Ledger
+from .mapping_codec import is_encoded
 from .tmdl import Model, normalize_expression, parse_mapping_rows, parse_model
 
 SNAPSHOT_VERSION = 3
 
 
 def build_snapshot(model: Model, mapping_tables: list, config=None,
-                   with_metrics: bool = True) -> dict:
+                   with_metrics: bool = True, encoded: bool = True) -> dict:
     """Reduce a parsed model to its comparable JSON form (plus, for the
     template, the metrics the count floors and reports are built on)."""
     tables: dict = {}
@@ -50,7 +51,8 @@ def build_snapshot(model: Model, mapping_tables: list, config=None,
                 "properties": dict(sorted(m.properties.items())),
             } for m in table.measures.values()},
         }
-        if tname in mapping_tables:
+        if tname in mapping_tables and not is_encoded(
+                "\n".join(p.source for p in table.partitions.values())):
             rows: dict = {}
             for part in table.partitions.values():
                 rows.update(parse_mapping_rows(part.source))
@@ -63,6 +65,11 @@ def build_snapshot(model: Model, mapping_tables: list, config=None,
         "relationships": {sig: dict(rel.properties)
                           for sig, rel in sorted(model.relationships.items())},
     }
+    if encoded:
+        from .mappings import snapshot_encoded
+        enc = snapshot_encoded(model, mapping_tables)
+        if enc:
+            snap["encoded_mapping"] = enc
     if with_metrics:
         from .metrics import compute_metrics
         from .sources import identity, table_source_views
@@ -145,8 +152,11 @@ def kind_inventory(snapshot: dict) -> dict:
     * mapping_row  — ``Table/row_key``
     * relationship — ``From[col] -> To[col]``
     """
+    from .mappings import inventory
     tables = snapshot.get("tables") or {}
+    enc_rows, enc_cats = inventory(snapshot)
     return {
+        "mapping_category": set(enc_cats),
         "table": set(tables),
         "column": {f"{t}[{c}]" for t, body in tables.items()
                    for c in (body.get("columns") or {})},
@@ -154,7 +164,7 @@ def kind_inventory(snapshot: dict) -> dict:
                     for m in (body.get("measures") or {})},
         "mapping_row": {f"{t}/{k}"
                         for t, rows in (snapshot.get("mapping_rows") or {}).items()
-                        for k in rows},
+                        for k in rows} | set(enc_rows),
         "relationship": set(snapshot.get("relationships") or {}),
     }
 
@@ -167,21 +177,42 @@ def _host_table(kind: str, ref: str) -> str:
     return ref
 
 
-def update_retirements(prev: dict, fresh: dict, ledger: Ledger) -> dict:
+def update_retirements(prev: dict, fresh: dict, ledger: Ledger,
+                       template_tree: str | None = None) -> dict:
     """Compare the previous baseline to the fresh snapshot; append ``retired``
     events for template drops and ``revived`` stamps for returns.
 
     Returns {"retired": [events], "revived": [events]}.
     """
+    from .mappings import inventory
     prev_inv = kind_inventory(prev)
     fresh_inv = kind_inventory(fresh)
     known = ledger.retired_refs()
     dropped_tables = prev_inv["table"] - fresh_inv["table"]
+    enc_rows, enc_cats = inventory(prev)
+    dropped_cats = prev_inv["mapping_category"] - fresh_inv["mapping_category"]
 
     retired = []
-    for kind in ("table", "column", "measure", "mapping_row", "relationship"):
+    for kind in ("table", "column", "measure", "mapping_category",
+                 "mapping_row", "relationship"):
         for ref in sorted(prev_inv[kind] - fresh_inv[kind]):
             if (kind, ref) in known:
+                continue
+            if kind == "mapping_category":
+                table, cat, keys = enc_cats[ref]
+                if table in dropped_tables:
+                    continue
+                retired.append(ledger.record_retirement(
+                    kind, ref, source="capture", table=table, category=cat,
+                    keys=sorted(set(keys))))
+                continue
+            if kind == "mapping_row" and ref in enc_rows:
+                table, cat, key = enc_rows[ref]
+                if table in dropped_tables or f"{table}/{cat}" in dropped_cats:
+                    continue
+                retired.append(ledger.record_retirement(
+                    kind, ref, source="capture", table=table, category=cat,
+                    row_key=key))
                 continue
             # an object whose whole table was dropped is covered by the
             # table's own retirement entry — never double-record it
@@ -203,8 +234,10 @@ def update_retirements(prev: dict, fresh: dict, ledger: Ledger) -> dict:
     revived = []
     for (kind, ref), event in ledger.active_retirements(model=None).items():
         if kind in fresh_inv and ref in fresh_inv[kind]:
-            revived.append(ledger.record_revival(kind, ref, source="capture",
-                                                 note="object returned to the template"))
+            extra = {"template_tree": template_tree} if template_tree else {}
+            revived.append(ledger.record_revival(
+                kind, ref, source="capture",
+                note="object returned to the template", **extra))
     return {"retired": retired, "revived": revived}
 
 
@@ -221,11 +254,14 @@ def capture(fleet: Fleet) -> dict:
     path = fleet.baseline_path
     if path.exists():
         prev = json.loads(path.read_text(encoding="utf-8"))
-        changes = update_retirements(prev, fresh, ledger)
 
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    prov = provenance(fleet, stamp)
+    if path.exists():
+        changes = update_retirements(prev, fresh, ledger,
+                                     prov.get("template_tree"))
     fresh["captured_at"] = stamp
-    fresh["provenance"] = provenance(fleet, stamp)
+    fresh["provenance"] = prov
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(fresh, indent=2, ensure_ascii=False) + "\n",
                     encoding="utf-8")

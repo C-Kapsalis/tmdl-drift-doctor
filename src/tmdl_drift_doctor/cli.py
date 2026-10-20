@@ -842,6 +842,80 @@ def renames_apply(fleet_path, model_filter, dry_run, assume_yes) -> None:
         sys.exit(1)
 
 
+# ───────────────────────────── encoded mapping tables ─────────────────────────────
+
+@main.group("mapping")
+def mapping_group() -> None:
+    """Read and merge encoded entered-data mapping tables."""
+
+
+def _read_encoded(path):
+    from .mapping_codec import CodecError, extract_rows
+    try:
+        return extract_rows(Path(path).read_text(encoding="utf-8"))
+    except (OSError, CodecError) as e:
+        raise ConfigError(f"{path}: {e}")
+
+
+@mapping_group.command("decode")
+@click.argument("table", type=click.Path(exists=True, dir_okay=False))
+def mapping_decode(table) -> None:
+    """Print the row and category counts of an encoded table."""
+    from .mapping_codec import categories
+    rows = _read_encoded(table)
+    cats = categories(rows)
+    click.echo(f"{len(rows)} row(s), {len(cats)} categor"
+               f"{'y' if len(cats) == 1 else 'ies'}")
+    for c in cats:
+        click.echo(f"  {sum(1 for r in rows if r and r[0] == c):>5}  {c}")
+
+
+@mapping_group.command("diff")
+@click.argument("derived", type=click.Path(exists=True, dir_okay=False))
+@click.argument("template", type=click.Path(exists=True, dir_okay=False))
+def mapping_diff(derived, template) -> None:
+    """Categories the template has and DERIVED lacks (-), and categories
+    only DERIVED has (+)."""
+    from .mapping_codec import categories
+    mine = categories(_read_encoded(derived))
+    theirs = categories(_read_encoded(template))
+    lines = [f"- {c}" for c in theirs if c not in mine] + \
+        [f"+ {c}" for c in mine if c not in theirs]
+    for line in lines:
+        click.echo(line)
+    if not lines:
+        click.echo("both tables carry the same categories")
+
+
+@mapping_group.command("union")
+@click.option("--template", "template", required=True,
+              type=click.Path(exists=True, dir_okay=False))
+@click.option("--derived", "derived", required=True,
+              type=click.Path(exists=True, dir_okay=False))
+@click.option("--out", "out", required=True,
+              type=click.Path(exists=True, dir_okay=False),
+              help="The table file to write (it must already hold exactly "
+                   "one encoded string; everything else in it is kept).")
+def mapping_union(template, derived, out) -> None:
+    """Write every template row followed by each derived-only row into
+    --out, then read it back."""
+    from .mapping_codec import CodecError, extract_rows, replace_rows, \
+        union_rows, verify_rows
+    t_rows = _read_encoded(template)
+    d_rows = _read_encoded(derived)
+    rows, added = union_rows(t_rows, d_rows)
+    text = Path(out).read_text(encoding="utf-8")
+    try:
+        new = replace_rows(text, rows)
+        verify_rows(new, rows)
+    except CodecError as e:
+        raise ConfigError(f"{out}: {e}; nothing was written")
+    Path(out).write_text(new, encoding="utf-8")
+    back = extract_rows(Path(out).read_text(encoding="utf-8"))
+    click.echo(f"template rows {len(t_rows)}, derived-only rows added "
+               f"{added}, total {len(back)}")
+
+
 # ───────────────────────────── field parameters ─────────────────────────────
 
 @main.group("fieldparam")
