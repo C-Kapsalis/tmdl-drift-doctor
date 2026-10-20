@@ -346,6 +346,12 @@
 
 ### Fixed
 
+- **`diff` refuses a detection report it cannot read.** The two reports it
+  compares are artifacts: they may be hand-edited, truncated by a pipeline or
+  written by another version of the tool. A report whose models block, a
+  model's findings list or a single finding has the wrong shape raised a
+  Python error. The command now refuses such a report as a configuration
+  problem: exit 2, a message on standard error, no traceback.
 - **A saved detection report the ratchet cannot read is refused, not
   crashed on.** A CI job hands `ratchet check --from-json` an artifact, and
   the artifact may be hand-edited, truncated by a pipeline or written by

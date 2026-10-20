@@ -41,6 +41,39 @@ def _load(path) -> dict:
     return doc
 
 
+def _readable(path, doc) -> dict:
+    """A report whose shape is wrong cannot be read.
+
+    A report is an artifact: it may be hand-edited, truncated by a pipeline
+    or written by another version of the tool. Whatever it is, the command
+    must refuse it as a configuration problem, never crash on it.
+    """
+    p = Path(path)
+    models = doc.get("models")
+    if models is not None and not isinstance(models, dict):
+        raise DiffError(f"the report at {p} has a models block that is a "
+                        f"{type(models).__name__}, not an object; it cannot "
+                        f"be read")
+    for name, body in (models or {}).items():
+        if not isinstance(body, dict):
+            raise DiffError(f"the report at {p} has an entry for {name!r} "
+                            f"that is a {type(body).__name__}, not an "
+                            f"object; it cannot be read")
+        findings = body.get("findings")
+        if findings is None:
+            continue
+        if not isinstance(findings, list):
+            raise DiffError(f"the report at {p} has findings for {name!r} "
+                            f"that are a {type(findings).__name__}, not a "
+                            f"list; they cannot be read")
+        for f in findings:
+            if not isinstance(f, dict):
+                raise DiffError(f"the report at {p} has a finding for "
+                                f"{name!r} that is a {type(f).__name__}, not "
+                                f"an object; it cannot be read")
+    return doc
+
+
 def _items(doc: dict) -> dict:
     """{model: {(kind, ref)}} of the report's listed (not overridden)
     findings. A finding without a kind or a ref counts as ``?``."""
@@ -194,8 +227,8 @@ def write_diff(base_path, head_path, out_path, *, fleet=None) -> dict:
 
     Returns a summary: ``{"path", "lines", "stale", "objects", "models"}``.
     """
-    base = _load(base_path)
-    head = _load(head_path)
+    base = _readable(base_path, _load(base_path))
+    head = _readable(head_path, _load(head_path))
     stale = False
     if fleet is not None:
         stale = _stale_baseline(fleet)
