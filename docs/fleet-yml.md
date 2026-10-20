@@ -27,6 +27,8 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `fieldparam.placeholder_table` | table name | `#Report Measures` | Rows pointing at this table are placeholders, ignored by the cross-level check. |
 | `fieldparam.blank_row` | `{category, tables}` | `Blank Dimension_y`, `y-*` | The "no legend" option row each legend field parameter must carry, copied from the template per table. |
 | `fieldparam.skip_tables` | list of table names | `[]` | Field-parameter tables the template row merge leaves alone. |
+| `source_identity` | `{function, db_parameter}` | none (detection off) | How a table's source view is read: the first string argument of the source-function call (bare or `#"quoted"`), or the view folded into an inline query after the database parameter. With the block, a table reading another view than the template's is source-divergent. |
+| `notify_command` | shell command | none | Receives the run's view-enrichment entries as JSON on stdin, once per `remediate` run that produced any. |
 | `incremental_refresh` | `{enabled, fact_pattern, exempt}` | on; fact tables by role; `[]` | Which fact tables follow the template's incremental-refresh policy and window. |
 | `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |
 | `renames.columns` | mapping `Table.Old` -> `Table.New` | `{}` | Column renames (split at the last dot; cross-table moves are ignored). |
@@ -50,6 +52,7 @@ An entry is a bare path or a mapping:
 | `workspace` | `{name, guid, tenant_id, verified}` | GUIDs are checked; `verified` is a date or `false`; no two entries share a workspace guid. |
 | `overrides` | list or typed sections | Declared, reviewed divergence (below). |
 | `rename_profile` | string | The `renames.profiles` entry this model uses. |
+| `source_divergent` | list of table names | Tables declared source-divergent when the view cannot be read. |
 
 ## Overrides
 

@@ -74,6 +74,7 @@ REMEDIABLE_KINDS = (
     "retire.mapping_row",
     "retire.mapping_category",
     "retire.relationship",
+    "retire.source_view",
 )
 
 # Kind families whose findings carry a per-category suffix
@@ -97,7 +98,7 @@ SYNC_ONLY_KINDS = ()
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
                             "retire.mapping_row", "retire.mapping_category",
-                            "retire.relationship")
+                            "retire.relationship", "retire.source_view")
 
 # Kinds that fail a gate whatever `allowlist.kinds` says: a model that lost
 # a whole axis table, or live DAX naming a retired table, is never backlog.
@@ -867,7 +868,8 @@ def apply_overrides(fleet: Fleet, findings: list) -> list:
 def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
                  model_filter: Optional[str] = None,
                  kind_filter: Optional[str] = None,
-                 errors: Optional[list] = None) -> list:
+                 errors: Optional[list] = None,
+                 digest: Optional[list] = None) -> list:
     """Findings for every (or one) derived model, overrides applied.
 
     When `errors` is a list, a model that cannot be parsed is recorded there
@@ -881,6 +883,7 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
     findings: list = []
     from .annotations import findings as annotation_findings
     from .refresh import refresh_findings
+    from .sources import source_view_findings
     cache: dict = {}
     policies: dict = {}
     for name in fleet.models:
@@ -892,6 +895,8 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
                                          model))
             findings.extend(annotation_findings(name, fleet, cache))
             findings.extend(refresh_findings(name, fleet, model, policies))
+            findings.extend(source_view_findings(name, fleet, model, ledger,
+                                                 digest))
         except DriftDoctorError as e:
             if errors is None:
                 raise
@@ -930,14 +935,29 @@ def model_counts(fleet: Fleet, items: list) -> dict:
     }
 
 
+def divergence_report(fleet: Fleet, name: str, baseline: Optional[dict]):
+    from .sources import divergent_tables
+    if baseline is None:
+        return {}
+    try:
+        model = parse_model(fleet.model_definition(name))
+    except DriftDoctorError:
+        return {}
+    return {t: {"template": a, "model": b} for t, (a, b) in
+            divergent_tables(fleet, baseline, name, model).items()}
+
+
 def build_report(fleet: Fleet, findings: list, errors: list,
                  model_filter: Optional[str] = None,
-                 kind_filter: Optional[str] = None) -> dict:
+                 kind_filter: Optional[str] = None,
+                 baseline: Optional[dict] = None) -> dict:
     names = [model_filter] if model_filter else list(fleet.models)
     models = {}
     for name in names:
         items = [f for f in findings if f.model == name]
         models[name] = {
+            "source_divergent_tables": divergence_report(fleet, name,
+                                                         baseline),
             "gating": fleet.gating.get(name, "enforced"),
             "findings": [dict(f.to_dict(), actionable=is_actionable(f, fleet))
                          for f in items if not f.overridden],

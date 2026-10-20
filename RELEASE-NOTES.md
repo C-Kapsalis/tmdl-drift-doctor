@@ -185,6 +185,25 @@
   applied fix adds a "full refresh owed" entry to the run digest. Typed
   override section `refresh_windows` and the `incremental_refresh` key.
 
+- **Source divergence.** With a `source_identity` block in fleet.yml, a table
+  that reads another source view than the template's is source-divergent
+  (also `source_divergent: [...]` per model). `detect` prints the set and
+  `detect --json` reports `source_divergent_tables` per model. A column or
+  measure spliced onto such a table queues a view-enrichment notice: the run
+  merges them into `<state_dir>/view_enrichment_outstanding.json` (this
+  run's tables replace their own entries, others pass through untouched),
+  writes `view_enrichment_report.json` with this run's entries only and
+  pipes them to `notify_command`. `drift-doctor enrichment rescan|report`.
+  A modified relationship or a missing refresh policy on a divergent table
+  is `skipped_divergent` in batch mode.
+- **`retire.source_view`.** `capture` records a template table re-pointed
+  to another view once (`source_view_change` in the ledger); `remediate
+  --sync` re-points models still on the old view in every spelling (bare
+  or quoted helper call; inline queries in the partition and the refresh
+  policy together). A model on a view it declares (`source_views`
+  override) is retained and one on some other view is left for a person;
+  both are written to the decision digest (`remediate --digest-json FILE`).
+
 ### Changed
 
 - **`measure.wrong_host` is one finding per measure.** A template measure

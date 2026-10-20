@@ -112,6 +112,9 @@ def capture(fleet_path) -> None:
     for e in summary["revived"]:
         click.echo(f"  [ledger] revived {e['kind']}: {e['ref']} "
                    f"(returned to the template)")
+    for e in summary.get("repointed") or []:
+        click.echo(f"  [ledger] source view of {e['table']}: {e['old_view']} "
+                   f"-> {e['new_view']}")
 
 
 @main.command()
@@ -156,7 +159,8 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
     names = [model_filter] if model_filter else list(fleet.models)
     if as_json:
         click.echo(json.dumps(build_report(fleet, findings, errors,
-                                           model_filter, kind_filter),
+                                           model_filter, kind_filter,
+                                           baseline=baseline),
                               indent=2, ensure_ascii=False))
     elif as_csv:
         import csv
@@ -169,6 +173,14 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
         click.echo(buf.getvalue(), nl=False)
     else:
         _print_findings(fleet, findings, errors, model_filter, kind_filter)
+        from .detect import divergence_report
+        for name in names:
+            div = divergence_report(fleet, name, baseline)
+            if div:
+                click.echo(f"source-divergent tables in {name}: "
+                           + ", ".join(f"{t} ({v['model']} vs the template's "
+                                       f"{v['template']})"
+                                       for t, v in div.items()))
         if not kind_filter:
             rows = summarize(fleet, baseline, findings, names)
             click.echo("")
@@ -267,6 +279,9 @@ def _print_findings(fleet, findings, errors, model_filter, kind_filter):
 @click.option("--add-missing", is_flag=True,
               help="With --ref: also insert the measure into models that "
                    "lack it (on the template's host table).")
+@click.option("--digest-json", "digest_json", default=None, metavar="FILE",
+              help="Write the run's decision digest (what was retained, "
+                   "what needs a person, what owes a refresh) as JSON.")
 @click.option("--backup", is_flag=True,
               help="Copy each file to <name>.bak_<timestamp> before its first "
                    "write in this run; the copies are removed when the run "
@@ -275,7 +290,7 @@ def _print_findings(fleet, findings, errors, model_filter, kind_filter):
               help="Proceed on a stale baseline (misclassification risk).")
 def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
               assume_yes, interactive, confirm_deletions, refs, add_missing,
-              backup, allow_stale) -> None:
+              digest_json, backup, allow_stale) -> None:
     """Cascade template truth into the derived models (allowlist-gated).
 
     On a terminal every fix is confirmed (y/n, a = yes to the rest, q =
@@ -297,7 +312,12 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
         sys.exit(USAGE_EXIT)
     fleet = _load(fleet_path)
     baseline = _fresh_baseline(fleet, allow_stale)
-    detect_once = lambda: _detect(fleet, baseline, model_filter=model_filter)
+    decisions: list = []
+
+    def detect_once():
+        decisions.clear()
+        return _detect(fleet, baseline, model_filter=model_filter,
+                       digest=decisions)
 
     terminal = stdin_is_interactive()
     deletions_ok = sync and (confirm_deletions or (terminal and not assume_yes))
@@ -344,6 +364,24 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
     if converge and dry_run:
         click.echo("note: --converge has no effect with --dry-run (nothing "
                    "changes on disk between passes); showing one pass.")
+    if digest_json:
+        entries = list(decisions) + [d for r in results for d in r.digest]
+        Path(digest_json).write_text(json.dumps(
+            {"entries": entries}, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8")
+    for d in decisions:
+        click.echo(f"[decision] {d['model']}: {d['kind']} {d['name']} — "
+                   f"{d['note']}")
+    if not dry_run:
+        from .enrichment import aggregate, notify, write_report
+        entries = aggregate([n for r in results for n in r.notices])
+        if entries:
+            path = write_report(fleet.state_dir, entries)
+            click.echo(f"view enrichment: {len(entries)} table(s) need their "
+                       f"source view extended -> {path}")
+            warning = notify(fleet, entries)
+            if warning:
+                click.echo(f"warning: {warning}", err=True)
     failed = 0
     for n, result in enumerate(results, 1):
         if len(results) > 1:
@@ -477,7 +515,7 @@ def _ratchet_report(fleet, from_json, allow_stale):
     baseline = _fresh_baseline(fleet, allow_stale)
     errors: list = []
     findings = _detect(fleet, baseline, errors)
-    return build_report(fleet, findings, errors)
+    return build_report(fleet, findings, errors, baseline=baseline)
 
 
 def _refuse(problems):
@@ -840,6 +878,61 @@ def renames_apply(fleet_path, model_filter, dry_run, assume_yes) -> None:
                    + (" (dry run)" if dry_run else ""))
     if failed:
         sys.exit(1)
+
+
+# ───────────────────────────── view enrichment ─────────────────────────────
+
+@main.group("enrichment")
+def enrichment_group() -> None:
+    """Source views that must gain columns spliced onto divergent tables."""
+
+
+@enrichment_group.command("rescan")
+@_fleet_option
+@click.option("--model", "models", default=None,
+              help="Comma-separated model names to check (default: all).")
+@click.option("--registry", default=None, metavar="FILE",
+              help="Registry file (default: <state_dir>/"
+                   "view_enrichment_outstanding.json).")
+def enrichment_rescan(fleet_path, models, registry) -> None:
+    """Warn about registry entries whose recorded columns are gone from the
+    model. Exit 5 when any warning is printed (advisory); never writes."""
+    from .enrichment import REGISTRY, load_registry, rescan
+    fleet = _load(fleet_path)
+    path = Path(registry) if registry else fleet.state_dir / REGISTRY
+    entries = load_registry(path)
+    wanted = set(models.split(",")) if models else None
+    scoped = [e for e in entries if not wanted or e.get("model") in wanted]
+    if not scoped:
+        click.echo("no registry entries in scope.")
+        return
+    warnings = rescan(fleet, scoped)
+    for w in warnings:
+        click.echo(f"warning: {w}")
+    if warnings:
+        sys.exit(5)
+    click.echo(f"{len(scoped)} registry entr"
+               f"{'y' if len(scoped) == 1 else 'ies'} still match the models.")
+
+
+@enrichment_group.command("report")
+@_fleet_option
+@click.option("--format", "fmt", type=click.Choice(["markdown", "json"]),
+              default="markdown", show_default=True)
+@click.option("--registry", is_flag=True,
+              help="Render the whole registry instead of the last run's "
+                   "entries.")
+def enrichment_report(fleet_path, fmt, registry) -> None:
+    """Render the last run's (or the registry's) enrichment entries."""
+    from .enrichment import REGISTRY, REPORT, load_registry, markdown
+    fleet = _load(fleet_path)
+    entries = load_registry(fleet.state_dir / (REGISTRY if registry
+                                               else REPORT))
+    if fmt == "json":
+        click.echo(json.dumps({"entries": entries}, indent=2,
+                              ensure_ascii=False))
+    else:
+        click.echo(markdown(entries), nl=False)
 
 
 # ───────────────────────────── encoded mapping tables ─────────────────────────────

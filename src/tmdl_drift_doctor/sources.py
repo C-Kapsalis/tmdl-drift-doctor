@@ -32,7 +32,7 @@ def _patterns(ident: dict) -> list:
     fn = re.escape(ident["function"])
     db = re.escape(ident["db_parameter"])
     return [
-        re.compile(r'(?:#")?(?<![\w"])' + fn + r'"?\s*\(\s*"([^"]+)"'),
+        re.compile(r'(?:#"' + fn + r'"|(?<![\w"])' + fn + r')\s*\(\s*"([^"]+)"'),
         re.compile(r'#"' + db + r'"\s*&\s*"\."\s*&\s*"([^"]+)"'),
     ]
 
@@ -79,3 +79,95 @@ def rewrite_view(text: str, old: str, new: str, ident: dict) -> tuple:
             return g[:a - base] + new + g[b - base:]
         text = pat.sub(swap, text)
     return text, count
+
+
+def divergence_on(config: dict | None) -> bool:
+    """Divergence is detected only when fleet.yml has a `source_identity`
+    block (declared `source_divergent` tables always count)."""
+    return bool((config or {}).get("source_identity"))
+
+
+def divergent_tables(fleet, baseline: dict, name: str, model) -> dict:
+    """{table: (template view, model view)} for the tables of `model` that
+    read a different source view than the template's, plus the tables the
+    fleet entry declares divergent."""
+    out = {}
+    if divergence_on(fleet.raw):
+        t_views = baseline.get("table_source_views") or {}
+        mine = table_source_views(model, identity(fleet.raw))
+        out = {t: (t_views[t], v) for t, v in mine.items()
+               if t in t_views and t_views[t] != v}
+    else:
+        mine = {}
+    t_views = baseline.get("table_source_views") or {}
+    for t in fleet.source_divergent.get(name, ()):
+        out.setdefault(t, (t_views.get(t), mine.get(t)))
+    return dict(sorted(out.items()))
+
+
+def source_view_changes(prev: dict, fresh: dict) -> list:
+    """[(table, old view, new view)] for tables both snapshots read with
+    different views."""
+    a = prev.get("table_source_views") or {}
+    b = fresh.get("table_source_views") or {}
+    return [(t, a[t], b[t]) for t in sorted(set(a) & set(b)) if a[t] != b[t]]
+
+
+def view_chain(ledger) -> dict:
+    """{table: [(old, new), ...]} of the ledger's source-view changes, in
+    the order they were recorded."""
+    out: dict = {}
+    for e in ledger.entries():
+        if e.get("kind") == "source_view_change" and e.get("table"):
+            out.setdefault(e["table"], []).append((e.get("old_view"),
+                                                   e.get("new_view")))
+    return out
+
+
+def source_view_findings(name: str, fleet, model, ledger, digest=None) -> list:
+    """``retire.source_view``: a table the template re-pointed that this
+    model still reads through the old view. A model on a view it declares
+    (``source_views`` override) is retained; one on some other view is left
+    for a person. Both decisions go to the digest, never to a finding."""
+    from .detect import Finding
+    chain = view_chain(ledger)
+    if not chain:
+        return []
+    ident = identity(fleet.raw)
+    declared = {d["table"]: d["view"] for d in
+                (fleet.sections.get(name) or {}).get("source_views", ())}
+    out = []
+    for table, steps in sorted(chain.items()):
+        t = model.tables.get(table)
+        if t is None:
+            continue
+        view = table_view(t, ident)
+        final = steps[-1][1]
+        if view is None or view == final:
+            continue
+        step = next(((o, n) for o, n in steps if o == view), None)
+        if step is not None and table not in declared:
+            out.append(Finding(
+                kind="retire.source_view", model=name,
+                ref=f"{table}: {step[0]} -> {step[1]}",
+                detail=(f"the template re-pointed '{table}' from view "
+                        f"'{step[0]}' to '{step[1]}' (ledger) and '{name}' "
+                        f"still reads the old view"),
+                data={"table": table, "old_view": step[0],
+                      "new_view": step[1]}))
+            continue
+        if any(n == view for _o, n in steps):
+            continue                     # an intermediate view: a later step
+        if digest is None:
+            continue
+        if table in declared:
+            note = (f"retained by the model's source_views override "
+                    f"(declared view '{declared[table]}'); the template moved "
+                    f"to '{final}'")
+        else:
+            note = (f"needs-decision: '{name}' reads '{view}', neither the "
+                    f"template's old nor its new view ('{final}'); left "
+                    f"untouched")
+        digest.append({"model": name, "kind": "source_view", "name": table,
+                       "report_refs": None, "note": note})
+    return out

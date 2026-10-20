@@ -241,6 +241,27 @@ def update_retirements(prev: dict, fresh: dict, ledger: Ledger,
     return {"retired": retired, "revived": revived}
 
 
+def record_view_changes(prev: dict, fresh: dict, ledger: Ledger,
+                        template_tree: str | None = None) -> list:
+    """One ``source_view_change`` event per template table re-pointed to
+    another source view, never twice for the same table:old->new."""
+    from .sources import source_view_changes
+    known = {e.get("ref") for e in ledger.entries()
+             if e.get("kind") == "source_view_change"}
+    out = []
+    for table, old, new in source_view_changes(prev, fresh):
+        ref = f"{table}:{old}->{new}"
+        if ref in known:
+            continue
+        event = {"event": "repointed", "kind": "source_view_change",
+                 "ref": ref, "table": table, "old_view": old,
+                 "new_view": new, "source": "capture"}
+        if template_tree:
+            event["template_tree"] = template_tree
+        out.append(ledger.append(event))
+    return out
+
+
 # ───────────────────────── capture ─────────────────────────
 
 def capture(fleet: Fleet) -> dict:
@@ -250,7 +271,7 @@ def capture(fleet: Fleet) -> dict:
     fresh = build_snapshot(parse_model(fleet.template_definition),
                            fleet.mapping_tables, fleet.raw)
     ledger = Ledger(fleet.ledger_path)
-    changes = {"retired": [], "revived": []}
+    changes = {"retired": [], "revived": [], "repointed": []}
     path = fleet.baseline_path
     if path.exists():
         prev = json.loads(path.read_text(encoding="utf-8"))
@@ -260,6 +281,8 @@ def capture(fleet: Fleet) -> dict:
     if path.exists():
         changes = update_retirements(prev, fresh, ledger,
                                      prov.get("template_tree"))
+        changes["repointed"] = record_view_changes(prev, fresh, ledger,
+                                                   prov.get("template_tree"))
     fresh["captured_at"] = stamp
     fresh["provenance"] = prov
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,4 +300,5 @@ def capture(fleet: Fleet) -> dict:
         "relationships": len(inv["relationship"]),
         "retired": changes["retired"],
         "revived": changes["revived"],
+        "repointed": changes["repointed"],
     }

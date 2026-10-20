@@ -538,7 +538,27 @@ def _apply_refresh(fleet: Fleet, f: Finding) -> tuple:
     return fn(fleet, f)
 
 
+def _apply_source_view(fleet: Fleet, f: Finding) -> tuple:
+    from .sources import identity, rewrite_view
+    derived, _ = _model_paths(fleet, f)
+    from .tmdl import parse_model as _pm
+    table = _pm(derived).tables.get(f.data["table"])
+    if table is None:
+        raise DriftDoctorError(f"'{f.data['table']}' is gone; re-run detect")
+    path = table.file
+    old = path.read_text(encoding="utf-8")
+    new, n = rewrite_view(old, f.data["old_view"], f.data["new_view"],
+                          identity(fleet.raw))
+    if not n:
+        raise _Skip(f"no read of view '{f.data['old_view']}' was found in "
+                    f"{path.name}; nothing was changed")
+    return (f"re-point '{f.data['table']}' from '{f.data['old_view']}' to "
+            f"'{f.data['new_view']}' ({n} occurrence(s), spelling kept)",
+            [FileChange(path, old, new)])
+
+
 APPLIERS: dict = {
+    "retire.source_view": _apply_source_view,
     "refresh_policy.missing": _apply_refresh,
     "refresh_policy.window_drift": _apply_refresh,
     "refresh_policy.invalid": _apply_refresh,
@@ -602,15 +622,9 @@ class RunState:
     def divergent_tables(self, name: str) -> dict:
         """{table: (template view, model view)} for the model's tables that
         read a different source view than the template's."""
-        from .sources import identity, table_source_views
-        t_views = self.baseline.get("table_source_views") or {}
-        mine = table_source_views(self.model(name),
-                                  identity(self.fleet.raw))
-        out = {t: (t_views[t], v) for t, v in mine.items()
-               if t in t_views and t_views[t] != v}
-        for t in self.fleet.source_divergent.get(name, ()):
-            out.setdefault(t, (t_views.get(t), mine.get(t)))
-        return out
+        from .sources import divergent_tables
+        return divergent_tables(self.fleet, self.baseline, name,
+                                self.model(name))
 
     def record(self, f: Finding) -> None:
         kind = f.kind
@@ -777,7 +791,7 @@ PHASES = (
     "measure.expression_drift", "measure.property_drift",
     "relationship.missing", "relationship.modified",
     "relationship.casing_mismatch", "retire.relationship", "retire.measure",
-    "retire.mapping_row", "retire.mapping_category",
+    "retire.mapping_row", "retire.mapping_category", "retire.source_view",
     "retire.column", "retire.table",
 )
 
@@ -1011,9 +1025,21 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                             "archive"})
             for notice in _notices(fleet, f):
                 result.notices.append(notice)
+            if f.kind in ("column.missing", "measure.missing"):
+                table = f.ref[:f.ref.rindex("[")]
+                div = state.divergent_tables(f.model)
+                if table in div:
+                    from .enrichment import notice as enrich
+                    result.notices.append(enrich(fleet, baseline, f,
+                                                 *div[table]))
         except (DriftDoctorError, TmdlEditError, OSError) as e:
             out(f, "failed", str(e))
 
+    if not dry_run and result.notices:
+        from .enrichment import aggregate, merge_registry
+        entries = aggregate(result.notices)
+        if entries:
+            merge_registry(fleet.state_dir, entries)
     if not dry_run:
         for path in overlay.changed():
             result.errors.append(

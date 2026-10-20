@@ -20,8 +20,14 @@ source .venv/bin/activate
 .venv\Scripts\Activate.ps1
 
 pip install -e ".[dev]"    # editable install + pytest
+pip install -e ../../pbi-plot-styler/pbi-plot-styler   # report-side tests
 pytest                     # the full suite should pass before you start
 ```
+
+Two sync tests rename measures inside a Power BI report and count the
+report's references; that report logic belongs to
+[pbi-plot-styler](https://github.com/C-Kapsalis/pbi-plot-styler), so install
+it next to drift-doctor (any checkout path works) before running the suite.
 
 The editable install puts the `drift-doctor` console command on your PATH, so
 your code changes are picked up immediately. Try it against the bundled
