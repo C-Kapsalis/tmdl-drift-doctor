@@ -344,8 +344,36 @@
 - **Baseline snapshot format 3.** Run `drift-doctor capture` once after
   upgrading; the ledger is kept as is.
 
+### Changed
+
+- **A run prints one line per model and a fleet total.** A fleet run
+  printed one line per finding; an operator watching a sweep could not read
+  one line per model out of it, and there was no fleet total to compare
+  with the previous sweep. A remediation run now ends with a
+  `── Sync summary (DRY-RUN|APPLIED):` block: one line per model and a
+  `FLEET TOTAL` line, each with the same six counters.
+- **The cascade report carries the shape of each model.** Each model's
+  block now carries a shape line (`fact_tables=N f_measures=N
+  user_facing=N helpers=N`), so a reader can see that one model has grown
+  helper measures.
+- **The decision digest is persisted.** The digest entries — the items that
+  need a person's decision — were printed and could be written on request,
+  but a needs-decision item had no trace after the run that found it. A
+  run that produced at least one entry now writes
+  `<state_dir>/decision_digest.json`. A run with no entry never writes the
+  file and never removes an existing one.
+
 ### Fixed
 
+- **A model the run could not check is marked as such.** The cascade
+  report said a model was in the fleet; a reader could not tell a model
+  that is behind from a model that could not be looked at. A model whose
+  detection failed is now marked `[FAIL ]` with the reason, and the summary
+  counts it apart from the models that were checked.
+- **An interrupted run says what happened.** The run now catches Ctrl-C,
+  prints "any edits already accepted are written and valid; re-run to
+  resume from the remaining items" on standard error, and exits with the
+  interrupt code 130.
 - **A field-parameter row that points at a retired object is now removed.**
   A measure retired from the template leaves its field-parameter rows behind
   in the derived models: the row's `NAMEOF(...)` still names the measure
@@ -483,6 +511,25 @@
 - **A stray `table` line ends a block**, so a malformed concatenated file
   can no longer make one object swallow the next table. Inserting a measure
   block written at column 0 now indents it to object depth.
+
+### Known gaps
+
+Three checks the private suite had are not run by this tool. Each one needs
+a generator or a per-measure decision that is not part of it, so they are
+recorded here rather than half-implemented.
+
+- **The applied-filters coverage check is not run.** A dimension the model
+  tests but the applied-filters measure does not is not reported, and the
+  measure is not regenerated after a retirement or a purge. The generator
+  that builds the applied-filters measure lives in pbip-model-forge, not
+  here.
+- **The f-filter coverage check is not run.** A fact table read by a
+  visible measure with no matching category gate, and a category with no
+  gate in the all-filters measure, are not reported. The gate planner
+  lives in pbip-model-forge, not here.
+- **The visibility hygiene rules are not run.** A hidden user-facing
+  measure, and a visible helper measure, are not reported. The rule needs
+  a per-measure class decision this tool does not make.
 
 ## v1.1.0 (2026-10-12)
 

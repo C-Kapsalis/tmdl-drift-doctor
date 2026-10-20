@@ -128,6 +128,14 @@ class RunResult:
     def count(self, status: str) -> int:
         return sum(1 for o in self.outcomes if o.status == status)
 
+    def per_model(self) -> dict:
+        """{model: {counter: n}} of the run's outcomes, per model."""
+        out: dict = {}
+        for o in self.outcomes:
+            row = out.setdefault(o.finding.model, {})
+            row[o.status] = row.get(o.status, 0) + 1
+        return out
+
 
 # ───────────────────────── appliers ─────────────────────────
 # Each applier returns (action_label, [FileChange]) or raises.

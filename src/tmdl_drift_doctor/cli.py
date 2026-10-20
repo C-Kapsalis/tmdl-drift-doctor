@@ -97,6 +97,22 @@ def main() -> None:
                 pass
 
 
+INTERRUPT_EXIT = 130
+
+
+def _handle_interrupt() -> None:
+    """The operator stopped the run.
+
+    The edits already accepted are written and valid: the run writes each
+    file as it goes. Re-running resumes from the remaining items.
+    """
+    click.echo(
+        "\n\n[interrupted] Ctrl-C — stopping. Any edits already accepted "
+        "are written and valid; re-run to resume from the remaining items.",
+        err=True)
+    sys.exit(INTERRUPT_EXIT)
+
+
 @main.command()
 @_fleet_option
 def capture(fleet_path) -> None:
@@ -187,7 +203,7 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv, sync,
         buf = io.StringIO()
         writer = csv.writer(buf, lineterminator="\n")
         writer.writerow(CSV_HEADER)
-        for row in summarize(fleet, baseline, findings, names):
+        for row in summarize(fleet, baseline, findings, names, errors):
             writer.writerow([row[k] for k in CSV_HEADER])
         click.echo(buf.getvalue(), nl=False)
     else:
@@ -201,15 +217,26 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv, sync,
                                        f"{v['template']})"
                                        for t, v in div.items()))
         if not kind_filter:
-            rows = summarize(fleet, baseline, findings, names)
+            rows = summarize(fleet, baseline, findings, names, errors)
             click.echo("")
             for row in rows:
                 ok = in_cascade(row)
+                if row.get("failed"):
+                    click.echo(f"[FAIL ] {row['model']}")
+                    click.echo("    detection failed — this model was not "
+                               "checked")
+                    continue
                 click.echo(f"[{'OK  ' if ok else 'GAP '}] {row['model']}")
+                click.echo(f"    fact_tables={row['fact_tables']} "
+                           f"f_measures={row['filter_measures']} "
+                           f"user_facing={row['user_facing']} "
+                           f"helpers={row['helpers']}")
                 if row["missing"]:
                     click.echo(f"    - missing: {', '.join(row['missing'])}")
             passing = sum(1 for r in rows if in_cascade(r))
-            click.echo(f"Summary: {passing}/{len(rows)} models in cascade")
+            failed = sum(1 for r in rows if r.get("failed"))
+            click.echo(f"Summary: {passing}/{len(rows)} models in cascade"
+                       + (f" ({failed} not checked)" if failed else ""))
     if errors:
         sys.exit(PARSE_ERROR_EXIT)
     if any(is_gating(f, fleet) for f in findings):
@@ -378,10 +405,13 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
                 return (False, "non-interactive: not applied without --yes",
                         "skipped_noninteractive")
         kw["confirm"] = confirm
-    if converge:
-        results = remediate_converge(fleet, detect_once, **kw)
-    else:
-        results = [run_remediate(fleet, detect_once(), **kw)]
+    try:
+        if converge:
+            results = remediate_converge(fleet, detect_once, **kw)
+        else:
+            results = [run_remediate(fleet, detect_once(), **kw)]
+    except KeyboardInterrupt:
+        _handle_interrupt()
     if converge and dry_run:
         click.echo("note: --converge has no effect with --dry-run (nothing "
                    "changes on disk between passes); showing one pass.")
@@ -390,6 +420,8 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
         Path(digest_json).write_text(json.dumps(
             {"entries": entries}, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8")
+    if not dry_run:
+        _write_decision_digest(fleet, results)
     for d in (results[-1].digest if results else []):
         click.echo(f"[decision] {d['model']}: {d['kind']} {d['name']} — "
                    f"{d['note']}")
@@ -413,6 +445,8 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
             click.echo(f"\n══ pass {n}")
         _print_outcomes(result, dry_run)
         failed += result.count("failed") + len(result.errors)
+    _print_sync_summary(_merged(results), dry_run=dry_run,
+                        models=list(fleet.models))
     if converge and not dry_run:
         last = results[-1]
         state = ("converged" if last.count("applied") == 0
@@ -521,6 +555,81 @@ def _print_outcomes(result, dry_run):
                f"skipped_noninteractive="
                f"{result.count('skipped_noninteractive')} "
                f"failed={result.count('failed')}")
+
+
+# The counters a per-model line carries. The same six in every line, so a
+# reader can compare two lines by eye.
+_SYNC_COUNTERS = ("applied", "skipped_destructive", "skipped_override",
+                  "skipped_divergent", "auto_skipped_precondition", "failed")
+
+
+def _merged(results):
+    """The run's outcomes, every pass together."""
+    from .remediate import RunResult
+    merged = RunResult()
+    for r in results:
+        merged.outcomes.extend(r.outcomes)
+        merged.digest.extend(r.digest)
+        merged.errors.extend(r.errors)
+    return merged
+
+
+def _write_decision_digest(fleet, results) -> None:
+    """The run's decision digest, persisted.
+
+    The digest entries — the items that need a person's decision — are
+    printed, but a needs-decision item has no trace after the run that
+    found it. The file is written only when the run produced at least one
+    entry, and a run with none never removes an existing one.
+    """
+    from datetime import datetime, timezone
+    entries = [d for r in results for d in r.digest]
+    if not entries:
+        return
+    doc = {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(
+            timespec="seconds"),
+        "models": sorted({d.get("model") for d in entries if d.get("model")}),
+        "entries": [{"model": d.get("model"), "kind": d.get("kind"),
+                     "name": d.get("name"), "note": d.get("note"),
+                     "report_refs": d.get("report_refs") or 0}
+                    for d in entries],
+    }
+    path = fleet.state_dir / "decision_digest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+
+
+def _sync_counts(row: dict) -> dict:
+    """The six counters of one model, with 'would-apply' folded into
+    'applied' for a dry run."""
+    out = {c: row.get(c, 0) for c in _SYNC_COUNTERS}
+    if row.get("would-apply"):
+        out["applied"] += row["would-apply"]
+    return out
+
+
+def _print_sync_summary(result, *, dry_run: bool, models: list) -> None:
+    """One line per model and a fleet total.
+
+    A fleet run prints one line per finding; an operator watching a sweep
+    cannot read one line per model out of it, and there is no fleet total
+    to compare with the previous sweep.
+    """
+    per = result.per_model()
+    click.echo("")
+    click.echo(f"── Sync summary ({'DRY-RUN' if dry_run else 'APPLIED'}):")
+    total = {c: 0 for c in _SYNC_COUNTERS}
+    for name in models:
+        counts = _sync_counts(per.get(name) or {})
+        for c in _SYNC_COUNTERS:
+            total[c] += counts[c]
+        click.echo(f"{name}: " + " ".join(
+            f"{c}={counts[c]}" for c in _SYNC_COUNTERS))
+    click.echo("FLEET TOTAL: " + " ".join(
+        f"{c}={total[c]}" for c in _SYNC_COUNTERS))
 
 
 # ───────────────────────────── ratchet ─────────────────────────────
