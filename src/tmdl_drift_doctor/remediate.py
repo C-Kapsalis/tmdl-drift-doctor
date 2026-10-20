@@ -532,6 +532,13 @@ APPLIERS: dict = {
 }
 
 
+def applier_for(kind: str):
+    if kind in APPLIERS:
+        return APPLIERS[kind]
+    from .fieldparams import applier_for as fp
+    return fp(kind)
+
+
 # ───────────────────────── run state ─────────────────────────
 
 class RunState:
@@ -739,7 +746,13 @@ PHASES = (
 
 
 def _phase(f: Finding) -> tuple:
-    rank = PHASES.index(f.kind) if f.kind in PHASES else len(PHASES)
+    if f.kind in PHASES:
+        rank = PHASES.index(f.kind)
+    else:
+        derived = [i for i, k in enumerate(DERIVED_PHASE_KINDS)
+                   if kind_matches(f.kind, k)]
+        rank = len(PHASES) + (derived[0] if derived
+                              else len(DERIVED_PHASE_KINDS))
     # template-only expressions are added in alphabetical order
     return (rank, f.ref if f.kind == "expression.missing" else "")
 
@@ -764,10 +777,11 @@ BATCH_SAFE_KINDS = (
 # The field-parameter / mapping phase, in the order it is applied after the
 # structural phase (tables, measures, columns, relationships).
 DERIVED_PHASE_KINDS = (
-    "fieldparam.row_missing", "fieldparam.cross_level",
+    "fieldparam.schema_modernize", "fieldparam.row_missing",
+    "fieldparam.row_drift", "fieldparam.cross_level",
     "fieldparam.plot_specific_extra", "fieldparam.blank_row",
-    "fieldparam.dangling_row", "fieldparam.schema_modernize",
-    "mapping_category.missing", "category_annotation.undeclared",
+    "fieldparam.dangling_row", "mapping_category.missing",
+    "category_annotation.undeclared",
 )
 
 # Deletions: never applied in batch mode or under --yes; they need an
@@ -836,7 +850,8 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 "extensions are reported for review, never auto-remediated. "
                 "Edit the derived model directly if it is unwanted.")
             continue
-        if f.kind not in APPLIERS:
+        applier = applier_for(f.kind)
+        if applier is None:
             out(f, "manual",
                 f"kind '{f.kind}' has no automated fix — resolve it by "
                 f"editing the model directly")
@@ -889,7 +904,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 out(f, "auto_skipped_precondition", reason)
                 continue
             try:
-                label, changes = APPLIERS[f.kind](fleet, f)
+                label, changes = applier(fleet, f)
             except _Skip as skip:
                 out(f, "skipped", str(skip))
                 continue

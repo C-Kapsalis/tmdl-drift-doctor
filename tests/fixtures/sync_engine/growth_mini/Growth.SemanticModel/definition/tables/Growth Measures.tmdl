@@ -1,0 +1,22 @@
+/// Growth-only measure container (fixture overlay).
+table 'Growth Measures'
+	lineageTag: e9964dfe-696a-4eb7-8da3-0ce0965571d3
+
+	measure 'Cohort Retention %' = DIVIDE(SUM('Cohort Performance'[retained_users]), SUM('Cohort Performance'[cohort_size]))
+		formatString: 0.0%;-0.0%;0.0%
+		lineageTag: 1d802b15-b2f5-472e-ad0d-027195a6610a
+
+	column z
+		isHidden
+		formatString: 0
+		lineageTag: 7878367c-f044-4892-9be4-dbd39392f1f8
+		summarizeBy: sum
+		sourceColumn: [Value]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Growth Measures' = calculated
+		mode: import
+		source = {(1)}
+
+	annotation PBI_Id = 800d8f86e1e1463890e11901c59efb04

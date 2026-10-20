@@ -1,0 +1,105 @@
+/// Contains dimensions used to categorize and filter the advertising accounts that manage campaigns across services, enabling analysis by account and account-specific details across platforms.
+table _Accounts
+	lineageTag: e6e351ab-3720-4c94-989a-5cdc194a3c58
+
+	/// Name of the integrated account.
+	column 'Account Name'
+		dataType: string
+		lineageTag: bf7fc78a-8af7-4952-91c0-8786bdd0b23f
+		summarizeBy: none
+		sourceColumn: Account Name
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Name of the integrated marketing service used.
+	/// 
+	column 'Account Service'
+		dataType: string
+		lineageTag: 796060c6-a1e4-4577-a3cd-4c82e6e6d1eb
+		summarizeBy: none
+		sourceColumn: Account Service
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Account Slug'
+		dataType: string
+		isHidden
+		lineageTag: af85042c-ef00-4461-b48b-5d63b034a5d2
+		summarizeBy: none
+		sourceColumn: Account Slug
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Account Organization Name'
+		dataType: string
+		isHidden
+		lineageTag: 1596b500-ce3a-4d10-972c-5cbba8f2ad12
+		summarizeBy: none
+		sourceColumn: Account Organization Name
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Account Updated At Db'
+		dataType: dateTime
+		isHidden
+		formatString: General Date
+		lineageTag: 061c4041-3239-40cb-a01a-e0f52981250d
+		summarizeBy: none
+		sourceColumn: Account Updated At Db
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_x_id
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: aa1fcedc-b5ad-4bc6-a6be-b42f0ce0e0c6
+		summarizeBy: none
+		sourceColumn: account_x_id
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_id
+		dataType: string
+		isHidden
+		lineageTag: 22f14a64-c437-4d5e-8f83-cd069db0967d
+		summarizeBy: none
+		sourceColumn: account_id
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_organization_id
+		dataType: string
+		isHidden
+		lineageTag: 33811f11-bab8-41ad-aa8b-71cc83153123
+		summarizeBy: none
+		sourceColumn: account_organization_id
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	partition _Accounts-c64aeb88-32c4-4707-b2d2-d42b4b3451a9 = m
+		mode: import
+		queryGroup: Dimensions
+		source =
+				let
+				    Source = source_filter_dates("_accounts_n", "", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit"),
+				    camelcase = _underscore_to_camelcase(Source, Source)
+				in
+				    camelcase
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navigation
+

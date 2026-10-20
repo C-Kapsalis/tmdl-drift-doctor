@@ -1,0 +1,3 @@
+relationship 3778fbfa-99d3-4a7e-ac0d-65060020add7
+	fromColumn: Campaigns.account_x_id
+	toColumn: _Accounts.account_x_id

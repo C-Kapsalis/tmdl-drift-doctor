@@ -135,6 +135,22 @@
   `x-Plot Specific`, `y-Selector` or `y-Plot Specific` table fails `detect`
   whatever `allowlist.kinds` says (writing it still needs the allowlist).
 
+- **Field-parameter tables.** `tmdl_drift_doctor.fieldparams` reads and
+  rewrites the tuple constructor of a field parameter losslessly: rows are
+  re-sorted by ordinal and grouped under regenerated `-- <group>` headers,
+  while parked (commented-out) rows, annotation comments, inline trailers
+  and wide tuples survive, the last tuple never keeps a comma, and a second
+  write changes nothing. New kinds built on it:
+  `fieldparam.row_missing` / `fieldparam.row_drift` (template rows),
+  `fieldparam.cross_level.<category>` and
+  `fieldparam.plot_specific_extra.<category>` (dimension levels that
+  disagree), `fieldparam.blank_row` (the "no legend" row; `detect --kind
+  fieldparam.blank_row` exits 2 when the template has none),
+  `fieldparam.schema_modernize` / `fieldparam.schema_blocked` (column
+  schema; a table with its own extra columns is never touched) and
+  `fieldparam.dangling_row` (rows whose NAMEOF points at nothing).
+  `drift-doctor fieldparam retag` moves rows between categories.
+
 ### Changed
 
 - **`measure.wrong_host` is one finding per measure.** A template measure

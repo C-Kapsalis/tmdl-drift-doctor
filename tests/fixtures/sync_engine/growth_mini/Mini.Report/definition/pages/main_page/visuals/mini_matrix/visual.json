@@ -1,0 +1,91 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "mini_matrix",
+  "position": {
+    "x": 100,
+    "y": 100,
+    "z": 1000,
+    "height": 400,
+    "width": 800,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "pivotTable",
+    "query": {
+      "queryState": {
+        "Rows": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "__Calendar"
+                    }
+                  },
+                  "Property": "Month"
+                }
+              },
+              "queryRef": "__Calendar.Month",
+              "nativeQueryRef": "Month",
+              "active": true,
+              "displayName": "Month"
+            }
+          ]
+        },
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "#Report Measures"
+                    }
+                  },
+                  "Property": "CTR"
+                }
+              },
+              "queryRef": "#Report Measures.CTR",
+              "nativeQueryRef": "CTR",
+              "displayName": "CTR"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Growth Measures"
+                    }
+                  },
+                  "Property": "Cohort Retention %"
+                }
+              },
+              "queryRef": "Growth Measures.Cohort Retention %",
+              "nativeQueryRef": "Cohort Retention %",
+              "displayName": "Cohort Retention %"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "#Report Measures"
+                  }
+                },
+                "Property": "CTR"
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    }
+  }
+}

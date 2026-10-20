@@ -1,0 +1,13 @@
+	column unique_clicks
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: caa8bab6-4059-4900-ad78-fb166ffd480a
+		summarizeBy: sum
+		sourceColumn: unique_clicks
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}

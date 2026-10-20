@@ -193,6 +193,11 @@ ledger. A retirement that derived work still depends on is refused: retire
 | `measure.wrong_host` | A template measure lives on a different table in the derived model | Move the derived block verbatim to the template's host (DAX and lineage tag untouched; destination written first) | allowlist |
 | `measure.duplicate_host` | The same measure name sits on the template's host and on another table (the model will not load) | Remove the stale extra copy; the copy on the template's host stays | allowlist |
 | `measure.renamed` | The template renamed a measure (one missing name and one derived-only name share a core: same name once one prefix such as `-`, `_`, `#` or `x-` is stripped) | Rename the derived declaration, rewrite every DAX reference, and (with pbi-plot-styler installed) every report binding | allowlist |
+| `fieldparam.row_missing` / `fieldparam.row_drift` | A template field-parameter row (matched on its display name) is absent or different, and its NAMEOF resolves in the model | Add or replace the row through the lossless row writer (parked rows, comments and group headers survive) | allowlist |
+| `fieldparam.cross_level.<category>` / `fieldparam.plot_specific_extra.<category>` | A dimension row is registered at some numbered levels but not others, or only in a variant table | Add the row to every numbered level that lacks it (never into a narrower level) | allowlist |
+| `fieldparam.blank_row` | A legend field parameter lacks the template's "no legend" row, or it drifted | Append (or restore) the template's row; an arity mismatch is refused | allowlist |
+| `fieldparam.schema_modernize` / `fieldparam.schema_blocked` | A field-parameter table's columns differ from the template's | Rewrite the column blocks and remap the rows; a table with its own extra columns is `schema_blocked` and never touched | allowlist / report-only |
+| `fieldparam.dangling_row` | Live rows whose NAMEOF points at nothing (the calculated table fails to process) | Remove exactly those rows | allowlist |
 | `relationship.missing` | Template relationship (matched on `From[col] -> To[col]`, never on its GUID) absent | Append the template's raw block, once both endpoint columns exist | allowlist |
 | `relationship.modified` | Same endpoints, different cardinality, direction, or active flag | Overwrite with the template's block, keeping the derived block name | allowlist |
 | `relationship.extra` | Derived-only relationship between two shared tables | Nothing: advisory | never remediated |
@@ -330,6 +335,7 @@ than a clean `detect`:
 | `rename measure OLD NEW` | Renames a measure in the template and every model: picker labels, the declaration, DAX references (text comparisons included) and report bindings; `--dry-run` first | 0, 1 when no model declares OLD, 2 on a precision loss without `--format-arm` |
 | `renames check` / `renames apply` | Checks that every `renames:` target exists in each model / rewrites references to the old names | 0 / 1 |
 | `remediate --ref NAME` | Pushes one template measure to every model where each hosts it (lineage tag kept, overrides honored); `--add-missing` inserts it where absent | 0 / 1 / 2 for an unknown name |
+| `fieldparam retag --from A --to B --display D FILES` | Moves the named live field-parameter rows from category A to B (only the category literal changes); nothing is written unless every row is found | 0 / 1 |
 | `review --out REVIEW.md` | Writes a per-model checklist of everything routed to a human: blocked retirements, precondition skips, wrong or duplicate hosts, advisories, overrides in force | 0 |
 
 Keep `remediate` on a maintainer's machine where the diffs get reviewed and

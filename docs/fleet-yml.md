@@ -21,6 +21,11 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `families.growth.suffixes` | list (two or more) | `Growth.SemanticModel`, `insights.SemanticModel` | Folder suffixes that make a model a growth-family member. |
 | `metadata.total` | integer | none | When present, must equal the number of model entries. |
 | `count_floor.family_prefixes` | list of table-name prefixes | `x-Selector`, `x-Plot Specific`, `y-Selector`, `y-Plot Specific` | Axis-table families. A missing axis table fails `detect` whatever `allowlist.kinds` says. |
+| `fieldparam_tables` | list of table-name globs | auto | Field-parameter tables. When set, schema modernization runs on them; when unset, every calculated table built from `NAMEOF` tuples counts as one. |
+| `fieldparam.families` | list of `{prefixes, role}` | `x-Selector`/`x-Plot Specific` (metric), `y-Selector`/`y-Plot Specific` (dimension) | The first prefix names the numbered levels (`<prefix> <n>`); the others are variant tables. |
+| `fieldparam.placeholder_table` | table name | `#Report Measures` | Rows pointing at this table are placeholders, ignored by the cross-level check. |
+| `fieldparam.blank_row` | `{category, tables}` | `Blank Dimension_y`, `y-*` | The "no legend" option row each legend field parameter must carry, copied from the template per table. |
+| `fieldparam.skip_tables` | list of table names | `[]` | Field-parameter tables the template row merge leaves alone. |
 | `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |
 | `renames.columns` | mapping `Table.Old` -> `Table.New` | `{}` | Column renames (split at the last dot; cross-table moves are ignored). |
 | `renames.profiles` | mapping name -> `{measures, columns}` | `{}` | Alternative maps; a model selecting one (`rename_profile`) uses it INSTEAD of the default maps. |

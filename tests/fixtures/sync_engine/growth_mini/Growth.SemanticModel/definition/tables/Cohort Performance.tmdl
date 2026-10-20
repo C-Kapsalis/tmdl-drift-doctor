@@ -1,0 +1,67 @@
+/// Growth-only cohort data table (fixture overlay).
+table 'Cohort Performance'
+	lineageTag: 0136b161-f857-46c5-a743-151eb995ac99
+
+	column account_x_id
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: dc7fd76f-8eb9-4e32-b4b5-ebae1e04492e
+		summarizeBy: sum
+		sourceColumn: account_x_id
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column date
+		dataType: dateTime
+		isHidden
+		formatString: General Date
+		isAvailableInMdx: false
+		lineageTag: 4096e962-c364-46e2-b0e6-04a3cabfd492
+		summarizeBy: none
+		sourceColumn: date
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column cohort_size
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 75dcc881-e146-421b-b226-24ba07fe0a99
+		summarizeBy: sum
+		sourceColumn: cohort_size
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column retained_users
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5ae7a9c9-9464-428d-90fe-7e0ad8e55a96
+		summarizeBy: sum
+		sourceColumn: retained_users
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	partition 'Cohort Performance-7c149f83-09d6-4306-bf6a-8b9fb9c259ae' = m
+		mode: import
+		queryGroup: Marketing
+		source =
+				let
+				    Source = source_filter_dates("cohort_performance_n", "date", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit")
+				in
+				    Source
+
+	annotation PBI_ResultType = Table

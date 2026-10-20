@@ -58,12 +58,27 @@ REMEDIABLE_KINDS = (
     "relationship.missing",
     "relationship.modified",
     "relationship.casing_mismatch",
+    "fieldparam.schema_modernize",
+    "fieldparam.blank_row",
+    "fieldparam.row_missing",
+    "fieldparam.row_drift",
+    "fieldparam.dangling_row",
     "retire.table",
     "retire.column",
     "retire.measure",
     "retire.mapping_row",
     "retire.relationship",
 )
+
+# Kind families whose findings carry a per-category suffix
+# (``fieldparam.cross_level.<category>``).
+REMEDIABLE_PREFIXES = ("fieldparam.cross_level", "fieldparam.plot_specific_extra")
+
+
+def is_remediable(kind: str) -> bool:
+    return kind in REMEDIABLE_KINDS or any(
+        kind == p or kind.startswith(p + ".") for p in REMEDIABLE_PREFIXES)
+
 
 # Kinds that only inform, never remediated: deleting or relocating a derived
 # model's own work is a human decision, full stop.
@@ -116,7 +131,7 @@ class Finding:
             "derived_value": self.derived_value,
             "detail": self.detail,
             "advisory": self.advisory,
-            "remediable": self.kind in REMEDIABLE_KINDS,
+            "remediable": is_remediable(self.kind),
         }
         data = {k: v for k, v in (self.data or {}).items()
                 if k not in ("blocked", "row")}
@@ -456,6 +471,10 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
     findings.extend(_retirements(name, model, live, baseline, retire))
     findings.extend(_stranded_refs(name, model, ledger))
     findings = drop_paired_extras(findings)
+
+    # ── field-parameter tables ──
+    from .fieldparams import fieldparam_findings
+    findings.extend(fieldparam_findings(name, fleet, model))
 
     # ── count floors against the template's captured metrics ──
     from .metrics import COUNT_KIND, count_floor_findings

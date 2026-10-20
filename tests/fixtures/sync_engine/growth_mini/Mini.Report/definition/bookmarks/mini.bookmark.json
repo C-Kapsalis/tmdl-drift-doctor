@@ -1,0 +1,73 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/1.0.0/schema.json",
+  "displayName": "Mini Bookmark",
+  "name": "mini",
+  "options": {
+    "targetVisualNames": [
+      "mini_matrix"
+    ],
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.11",
+    "activeSection": "main_page",
+    "sections": {
+      "main_page": {
+        "visualContainers": {
+          "mini_matrix": {
+            "singleVisual": {
+              "visualType": "pivotTable",
+              "projections": {
+                "Values": [
+                  {
+                    "queryRef": "#Report Measures.CTR",
+                    "active": true
+                  },
+                  {
+                    "queryRef": "Growth Measures.Cohort Retention %",
+                    "active": true
+                  }
+                ]
+              },
+              "orderBy": [
+                {
+                  "direction": 2,
+                  "expr": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "#Report Measures"
+                        }
+                      },
+                      "Property": "CTR"
+                    }
+                  }
+                }
+              ],
+              "display": {
+                "mode": "hidden"
+              }
+            },
+            "filters": {
+              "byExpr": [
+                {
+                  "type": "Categorical",
+                  "expression": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Growth Measures"
+                        }
+                      },
+                      "Property": "Cohort Retention %"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

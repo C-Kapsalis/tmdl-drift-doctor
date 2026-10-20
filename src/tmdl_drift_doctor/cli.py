@@ -26,7 +26,7 @@ from pathlib import Path
 
 import click
 
-from . import DriftDoctorError, StaleBaselineError, __version__
+from . import DriftDoctorError, StaleBaselineError, TmdlEditError, __version__
 from .baseline import capture as run_capture
 from .baseline import ensure_baseline_fresh, load_baseline
 from .detect import build_report, detect_fleet, is_actionable, is_gating
@@ -143,6 +143,12 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
             f"the stranded-reference check was requested but the ledger "
             f"({fleet.ledger_path}) records no retired table; it is empty or "
             f"unreadable, so the check would pass vacuously")
+    if (kind_filter or "").rstrip(".") == "fieldparam.blank_row":
+        from .fieldparams import TemplateUnavailable, canonical_blank_rows
+        try:
+            canonical_blank_rows(fleet)
+        except TemplateUnavailable as e:
+            raise ConfigError(f"the blank-row check was requested but {e}")
     errors: list = []
     findings = _detect(fleet, baseline, errors, model_filter=model_filter,
                        kind_filter=kind_filter)
@@ -834,6 +840,41 @@ def renames_apply(fleet_path, model_filter, dry_run, assume_yes) -> None:
                    + (" (dry run)" if dry_run else ""))
     if failed:
         sys.exit(1)
+
+
+# ───────────────────────────── field parameters ─────────────────────────────
+
+@main.group("fieldparam")
+def fieldparam_group() -> None:
+    """Edit field-parameter tables."""
+
+
+@fieldparam_group.command("retag")
+@click.option("--from", "source", required=True, help="Current category.")
+@click.option("--to", "dest", required=True, help="New category.")
+@click.option("--display", "displays", multiple=True, required=True,
+              help="Display name of a row to move (repeatable).")
+@click.argument("files", nargs=-1, required=True,
+                type=click.Path(exists=True, dir_okay=False))
+def fieldparam_retag(source, dest, displays, files) -> None:
+    """Move the named live rows from category --from to --to in every FILE
+    (only the category literal changes). Nothing is written unless every
+    requested row is found under --from in every file."""
+    from . import tmdl_edit as te
+    from .fieldparams import retag
+    planned = []
+    for path in files:
+        text = Path(path).read_text(encoding="utf-8")
+        try:
+            new, done = retag(text, source, dest, displays)
+            te.assert_tmdl_valid(new)
+        except (DriftDoctorError, TmdlEditError) as e:
+            click.echo(f"{path}: {e}")
+            sys.exit(1)
+        planned.append((path, new, done))
+    for path, new, done in planned:
+        Path(path).write_text(new, encoding="utf-8")
+        click.echo(f"{path}: retagged {', '.join(done)} -> {dest}")
 
 
 # ───────────────────────────── fleet ─────────────────────────────

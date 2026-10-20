@@ -1,0 +1,19 @@
+table f-Filters
+	lineageTag: cb47e5eb-1795-4c1e-844d-7445536855a0
+
+	measure f-Spend = int(not ISEMPTY(Ads))
+
+	column z
+		isHidden
+		formatString: 0
+		lineageTag: 6eab0264-7309-40ca-b1dc-18a1f8aea16e
+		summarizeBy: sum
+		sourceColumn: [Value]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition f-Filters = calculated
+		mode: import
+		source = {(1)}
+
+	annotation PBI_Id = b20919674c3d452288ffa0a3cc8c1c82

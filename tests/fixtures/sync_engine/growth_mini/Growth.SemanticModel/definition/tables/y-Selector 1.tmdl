@@ -1,0 +1,65 @@
+table 'y-Selector 1'
+	lineageTag: bec42270-9542-45f5-ae9f-a0e55c60a4e5
+
+	column 'y-Selector 1'
+		lineageTag: 75c7bc8e-c294-4843-818d-04ce91c46587
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'y-Selector 1 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'y-Selector 1 Fields'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'y-Selector 1 Fields'
+		isHidden
+		lineageTag: aa7a7dd0-aac7-45ed-8707-c6312173681d
+		summarizeBy: none
+		sourceColumn: [Value2]
+		sortByColumn: 'y-Selector 1 Order'
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'y-Selector 1 Order'
+		isHidden
+		formatString: 0
+		lineageTag: 5e7dd9cb-1af3-49b5-9ff8-76f6bacbe5e8
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'y-Selector 1 Field Category'
+		lineageTag: e77f1f24-e6b7-4c43-8ecc-c1f320475cfd
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'y-Selector 1 Is Query Related'
+		lineageTag: 822c66c3-6205-4269-b53e-8cbb9ef7f6e0
+		summarizeBy: none
+		sourceColumn: [Value5]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'y-Selector Main Plot-3070ef47-ea07-45c9-a4f9-b15514eec59a' = calculated
+		mode: import
+		source =
+				{
+				("  ", NAMEOF('#Report Measures'[z]), -1, "Blank Dimension_y", "Other"),
+				("Year", NAMEOF('__Calendar'[Calendar Year]), 0, "Date_y", "Query Related"),
+				("Month", NAMEOF('__Calendar'[Month]), 2, "Date_y", "Query Related"),
+				("Date", NAMEOF('__Calendar'[Date]), 4, "Date_day_y", "Query Related"),
+				("Account Service", NAMEOF('_Accounts'[Account Service]), 10, "Service_y", "Query Related"),
+				("Account Name", NAMEOF('_Accounts'[Account Name]), 11, "Account_y", "Query Related")
+				}
+
+	annotation PBI_Id = 24a17e95170b4d2fb8b861217a22663c

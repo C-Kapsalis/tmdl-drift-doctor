@@ -1,0 +1,80 @@
+/// Contains multiple rows per advertising campaign, with daily updates at the campaign and ad group levels. Provides metrics that support the main '#REPORT' advertising measures (e.g., Clicks, Conversions, CPA), allowing for comprehensive tracking and analysis of campaign performance over time.
+table Campaigns
+	isHidden
+	lineageTag: 0b5b1053-954b-413a-8560-db6aa8e90229
+
+	measure 'countrows campaigns' = CALCULATE(COUNTROWS(Campaigns))
+		isHidden
+		lineageTag: d5be30b7-5235-4ab2-b9ea-11a7a454fbf4
+
+		changedProperty = IsHidden
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Performance data from different digital marketing services in ad_group level.
+	column account_x_id
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 0119b5cd-d9c0-4c6e-a321-cf0696bb5f49
+		summarizeBy: sum
+		sourceColumn: account_x_id
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column date
+		dataType: dateTime
+		isHidden
+		formatString: General Date
+		isAvailableInMdx: false
+		lineageTag: 5dce8bc8-4ed0-423f-89b8-d6f277bfe3c9
+		summarizeBy: none
+		sourceColumn: date
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column clicks
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 3c6c4d9c-db70-447c-aaaa-e05c625ddc1d
+		summarizeBy: sum
+		sourceColumn: clicks
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column cost
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ad1780f8-57df-4e09-9113-cde6e4d9fe0b
+		summarizeBy: sum
+		sourceColumn: cost
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	partition Campaigns-2908cca8-7ab3-4079-bb8a-db2725dcb790 = m
+		mode: import
+		queryGroup: Marketing
+		source =
+				let
+				    Source = source_filter_dates("campaigns_n", "date", false, #"v-fromdate", Number.From(#"v-isRolling"), #"v-daysAgo", #"v-rows_limit"),
+				    #"Renamed Columns" = Table.RenameColumns(Source,{ {"currency", "Currency"}, {"currency_converted", "Currency Converted"},  {"is_marketing_related", "Is Marketing Related"}})
+				in
+				    #"Renamed Columns"
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navigation
