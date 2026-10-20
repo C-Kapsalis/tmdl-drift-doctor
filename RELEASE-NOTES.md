@@ -346,6 +346,14 @@
 
 ### Fixed
 
+- **A saved detection report the ratchet cannot read is refused, not
+  crashed on.** A CI job hands `ratchet check --from-json` an artifact, and
+  the artifact may be hand-edited, truncated by a pipeline or written by
+  another version of the tool. A report whose top level is not an object, or
+  whose scope block, models block, findings list or a single finding has the
+  wrong shape, raised a Python error. The ratchet now refuses such a report
+  the way it refuses any other configuration problem: exit 2, a message on
+  standard error, no traceback.
 - **A retirement no sync can apply is now named.** The ratchet counts the
   findings a sync could act on, so a retirement kind that no sync can apply
   was not printed at all: a report said nothing about an object the ledger

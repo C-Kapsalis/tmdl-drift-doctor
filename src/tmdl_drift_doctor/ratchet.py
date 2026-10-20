@@ -63,6 +63,9 @@ def report_problems(report: dict, *, writing: bool, prune: bool = False) -> list
     """Reasons a detect report cannot be trusted. A report without a scope
     block may be CHECKED (all its models are compared, no prune hint) but
     never used to WRITE floors."""
+    shape = report_shape_problems(report)
+    if shape:
+        return shape
     if report.get("schema_version") != JSON_SCHEMA_VERSION:
         return [f"report schema_version is {report.get('schema_version')!r}; "
                 f"the ratchet needs {JSON_SCHEMA_VERSION} (re-run `drift-doctor "
@@ -73,6 +76,11 @@ def report_problems(report: dict, *, writing: bool, prune: bool = False) -> list
         if writing:
             problems.append("the report has no scope block, so what it covered "
                             "is unknown; floors are never written from it")
+        scope = {}
+    elif not isinstance(scope, dict):
+        problems.append(f"the report's scope block is a "
+                        f"{type(scope).__name__}, not an object; the report "
+                        f"cannot be read")
         scope = {}
     if scope.get("kind_filter"):
         problems.append(f"the report is category-filtered (--kind "
@@ -86,9 +94,16 @@ def report_problems(report: dict, *, writing: bool, prune: bool = False) -> list
         problems.append(f"the report was produced with a non-default "
                         f"--overrides file ({scope['overrides']}); floors are "
                         f"only written from the fleet's own declarations")
-    bad = sorted({e.get("model", "?") for e in report.get("errors") or []}
-                 | {m for m, b in (report.get("models") or {}).items()
-                    if (b or {}).get("errors")})
+    models = report.get("models")
+    if models is not None and not isinstance(models, dict):
+        problems.append(f"the report's models block is a "
+                        f"{type(models).__name__}, not an object; the report "
+                        f"cannot be read")
+        models = {}
+    bad = sorted({e.get("model", "?") for e in report.get("errors") or []
+                  if isinstance(e, dict)}
+                 | {m for m, b in (models or {}).items()
+                    if isinstance(b, dict) and (b or {}).get("errors")})
     if bad:
         problems.append(f"the report carries a provider error (detection "
                         f"failed) for {', '.join(bad)}; its counts are "
@@ -99,6 +114,43 @@ def report_problems(report: dict, *, writing: bool, prune: bool = False) -> list
     return problems
 
 
+def report_shape_problems(report) -> list:
+    """Why a report cannot be read at all.
+
+    A report is an artifact: it may be hand-edited, truncated by a
+    pipeline, or written by another version of the tool. Whatever it is, the
+    ratchet must refuse it as a configuration problem — never crash on it.
+    """
+    if not isinstance(report, dict):
+        return [f"the report is a {type(report).__name__}, not an object; it "
+                f"cannot be read"]
+    models = report.get("models")
+    if models is not None and not isinstance(models, dict):
+        return [f"the report's models block is a {type(models).__name__}, not "
+                f"an object; it cannot be read"]
+    for name, body in (models or {}).items():
+        if not isinstance(body, dict):
+            return [f"the report's entry for {name!r} is a "
+                    f"{type(body).__name__}, not an object; it cannot be read"]
+        findings = body.get("findings")
+        if findings is None:
+            continue
+        if not isinstance(findings, list):
+            return [f"the report's findings for {name!r} are a "
+                    f"{type(findings).__name__}, not a list; they cannot be "
+                    f"read"]
+        for f in findings:
+            if not isinstance(f, dict):
+                return [f"the report's findings for {name!r} hold a "
+                        f"{type(f).__name__}, not an object; they cannot be "
+                        f"read"]
+    scope = report.get("scope")
+    if scope is not None and not isinstance(scope, dict):
+        return [f"the report's scope block is a {type(scope).__name__}, not an "
+                f"object; it cannot be read"]
+    return []
+
+
 # ───────────────────────── counts ─────────────────────────
 
 def counts(report: dict) -> dict:
@@ -107,7 +159,7 @@ def counts(report: dict) -> dict:
     for name, body in (report.get("models") or {}).items():
         by_kind: dict = {}
         for f in (body or {}).get("findings") or ():
-            if _counted(f):
+            if isinstance(f, dict) and _counted(f):
                 by_kind[f["kind"]] = by_kind.get(f["kind"], 0) + 1
         by_head: dict = {}
         for k, n in by_kind.items():
@@ -130,7 +182,8 @@ def resurrections(report: dict) -> dict:
     out = {}
     for name, body in (report.get("models") or {}).items():
         hits = [f for f in (body or {}).get("findings") or ()
-                if head(f.get("kind") or "") == HARD_ZERO]
+                if isinstance(f, dict)
+                and head(f.get("kind") or "") == HARD_ZERO]
         if hits:
             out[name] = hits
     return out
