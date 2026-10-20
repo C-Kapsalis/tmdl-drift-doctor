@@ -73,6 +73,11 @@ SECTIONS = {
                            {"owner", "added"}, None),
     "mapping_rows": ({"category", "key", "reason"}, {"owner", "added"}, None),
     "mapping_categories": ({"category", "reason"}, {"owner", "added"}, None),
+    "refresh_windows": ({"table", "reason"},
+                        {"kind", "owner", "added", "rollingWindowGranularity",
+                         "rollingWindowPeriods", "incrementalGranularity",
+                         "incrementalPeriods", "incrementalPeriodsOffset"},
+                        ("window", "absent")),
     "files": ({"path", "reason"}, {"owner", "added"}, None),
 }
 

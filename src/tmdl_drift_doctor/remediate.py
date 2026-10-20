@@ -530,7 +530,18 @@ def _apply_annotation(fleet: Fleet, f: Finding) -> tuple:
     return apply_undeclared(fleet, f)
 
 
+def _apply_refresh(fleet: Fleet, f: Finding) -> tuple:
+    from . import refresh
+    fn = {"refresh_policy.missing": refresh.apply_missing,
+          "refresh_policy.window_drift": refresh.apply_window,
+          "refresh_policy.invalid": refresh.apply_realign}[f.kind]
+    return fn(fleet, f)
+
+
 APPLIERS: dict = {
+    "refresh_policy.missing": _apply_refresh,
+    "refresh_policy.window_drift": _apply_refresh,
+    "refresh_policy.invalid": _apply_refresh,
     "category_annotation.undeclared": _apply_annotation,
     "mapping_category.missing": _apply_category_missing,
     "retire.mapping_category": _apply_retire_category,
@@ -989,6 +1000,15 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                     f.kind, f.model, f.ref, label,
                     files=[str(c.path) for c in changes])
             out(f, "applied", label, changes)
+            if f.kind.startswith("refresh_policy.") and not (
+                    f.kind == "refresh_policy.missing"
+                    and f.data.get("windowed")):
+                result.digest.append({
+                    "model": f.model, "kind": f.kind, "name": f.ref,
+                    "report_refs": None,
+                    "note": "full refresh owed: the refresh policy of this "
+                            "table changed; run a full refresh of its "
+                            "archive"})
             for notice in _notices(fleet, f):
                 result.notices.append(notice)
         except (DriftDoctorError, TmdlEditError, OSError) as e:
@@ -1110,6 +1130,13 @@ class OverlayWatch:
 def _divergent_guard(fleet: Fleet, state, f: Finding) -> str:
     """A modified relationship whose endpoint table reads a different
     source view than the template's is left alone in batch mode."""
+    if f.kind == "refresh_policy.missing":
+        table = f.data.get("table")
+        if table in state.divergent_tables(f.model):
+            return (f"'{table}' reads a different source view than the "
+                    f"template's; adding its refresh policy is decided by "
+                    f"hand")
+        return ""
     if f.kind != "relationship.modified":
         return ""
     divergent = state.divergent_tables(f.model)

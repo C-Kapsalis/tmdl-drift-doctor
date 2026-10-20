@@ -65,6 +65,9 @@ REMEDIABLE_KINDS = (
     "fieldparam.row_missing",
     "fieldparam.row_drift",
     "fieldparam.dangling_row",
+    "refresh_policy.missing",
+    "refresh_policy.window_drift",
+    "refresh_policy.invalid",
     "retire.table",
     "retire.column",
     "retire.measure",
@@ -877,13 +880,18 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
             f"{', '.join(fleet.models)}")
     findings: list = []
     from .annotations import findings as annotation_findings
+    from .refresh import refresh_findings
     cache: dict = {}
+    policies: dict = {}
     for name in fleet.models:
         if model_filter and name != model_filter:
             continue
         try:
-            findings.extend(detect_model(name, fleet, baseline, ledger))
+            model = parse_model(fleet.model_definition(name))
+            findings.extend(detect_model(name, fleet, baseline, ledger,
+                                         model))
             findings.extend(annotation_findings(name, fleet, cache))
+            findings.extend(refresh_findings(name, fleet, model, policies))
         except DriftDoctorError as e:
             if errors is None:
                 raise

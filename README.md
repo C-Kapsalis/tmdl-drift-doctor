@@ -202,6 +202,8 @@ ledger. A retirement that derived work still depends on is refused: retire
 | `extra.mapping_row` | A model-only row in an encoded mapping table | Nothing: advisory | never remediated |
 | `retire.mapping_category` | A whole mapping category retired from the template | Remove its rows; `blocked` when the model added its own keys to it | allowlist **+ `--sync`** |
 | `category_annotation.undeclared` / `category_annotation.orphaned` | A model-only mapping category without a `Category_*` annotation in model.tmdl / an annotation naming no category | Add the annotation (value from git history, else `"<Category> metrics"`) / nothing: report-only | allowlist / report-only |
+| `refresh_policy.missing` / `refresh_policy.window_drift` / `refresh_policy.invalid` | A fact table lacks the template's incremental-refresh policy / its window differs / its policy is malformed | Add the policy built from the model's OWN partition source / rewrite the window / copy the partition source into `sourceExpression`; each records "full refresh owed" in the run digest; never batch-safe | allowlist |
+| `refresh_policy.client_only` | The model has a policy the template's table does not | Nothing: report-only | never remediated |
 | `relationship.missing` | Template relationship (matched on `From[col] -> To[col]`, never on its GUID) absent | Append the template's raw block, once both endpoint columns exist | allowlist |
 | `relationship.modified` | Same endpoints, different cardinality, direction, or active flag | Overwrite with the template's block, keeping the derived block name | allowlist |
 | `relationship.extra` | Derived-only relationship between two shared tables | Nothing: advisory | never remediated |

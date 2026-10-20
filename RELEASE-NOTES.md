@@ -174,6 +174,17 @@
   `mapping_row` retirement without `row_key` (or with an empty `category`)
   stops every read.
 
+- **Incremental-refresh parity.** For fact tables the template decides
+  whether an incremental-refresh policy exists and what its window is:
+  `refresh_policy.missing` (the fix builds the policy from the model's own
+  partition source, never the template's; report-only when the table
+  cannot take one), `refresh_policy.window_drift`, `refresh_policy.invalid`
+  (duplicated or misplaced block, out-of-domain scalars, a
+  `sourceExpression` that differs from the partition source) and the
+  report-only `refresh_policy.client_only`. None is batch-safe; every
+  applied fix adds a "full refresh owed" entry to the run digest. Typed
+  override section `refresh_windows` and the `incremental_refresh` key.
+
 ### Changed
 
 - **`measure.wrong_host` is one finding per measure.** A template measure

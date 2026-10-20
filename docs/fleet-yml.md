@@ -27,6 +27,7 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `fieldparam.placeholder_table` | table name | `#Report Measures` | Rows pointing at this table are placeholders, ignored by the cross-level check. |
 | `fieldparam.blank_row` | `{category, tables}` | `Blank Dimension_y`, `y-*` | The "no legend" option row each legend field parameter must carry, copied from the template per table. |
 | `fieldparam.skip_tables` | list of table names | `[]` | Field-parameter tables the template row merge leaves alone. |
+| `incremental_refresh` | `{enabled, fact_pattern, exempt}` | on; fact tables by role; `[]` | Which fact tables follow the template's incremental-refresh policy and window. |
 | `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |
 | `renames.columns` | mapping `Table.Old` -> `Table.New` | `{}` | Column renames (split at the last dot; cross-table moves are ignored). |
 | `renames.profiles` | mapping name -> `{measures, columns}` | `{}` | Alternative maps; a model selecting one (`rename_profile`) uses it INSTEAD of the default maps. |
@@ -51,6 +52,12 @@ An entry is a bare path or a mapping:
 | `rename_profile` | string | The `renames.profiles` entry this model uses. |
 
 ## Overrides
+
+A `refresh_windows` section (`{table, kind: window | absent, reason, ...}`)
+declares a fact table's own refresh window (any of `rollingWindowGranularity`,
+`rollingWindowPeriods`, `incrementalGranularity`, `incrementalPeriods`,
+`incrementalPeriodsOffset`, layered over the template's) or that it has no
+policy on purpose.
 
 Typed sections also include `mapping_rows` (`{category, key, reason}`: the
 model keeps a row the template retired) and `mapping_categories`
