@@ -346,6 +346,16 @@
 
 ### Fixed
 
+- **`freshness` no longer claims a merge is safe for a retirement kind it
+  could not check.** When the head ledger holds a retirement of a kind the
+  command does not check (a `mapping_row`, for example), it printed
+  "nothing at risk: none of the unseen retirements is present in a derived
+  model" and wrote "None of them is present in any derived model, so nothing
+  can be resurrected by this merge" — a safety claim about a kind it never
+  looked at. The output now says the check is incomplete and that the merge
+  is not known to be safe, and the report body says the same instead of
+  claiming that nothing can be resurrected. The "nothing at risk" line is
+  printed only when every unseen retirement was checked.
 - **A table's last column no longer carries its refresh policy.** Copying
   or removing the last column of a table also copied or removed the
   table's `refreshPolicy` block, because the block boundary stopped only at

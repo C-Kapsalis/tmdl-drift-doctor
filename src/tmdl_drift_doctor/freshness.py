@@ -222,12 +222,17 @@ def render(base: dict, head: dict, unseen_pairs, at, unchecked, *,
             lines.append(f"| `{ref}` | {kind} | {_model_list(models)} |")
         lines += ["", "Keep the deletions when you merge, then let "
                   "`drift-doctor remediate --sync` settle the cascade.", ""]
-    else:
+    if unchecked:
+        lines += ["The check is **incomplete**: the kind of "
+                  f"{len(unchecked)} retirement(s) below could not be "
+                  "checked, so this merge is not known to be safe.", ""]
+    elif not at:
         lines += ["None of them is present in any derived model, so nothing "
                   "can be resurrected by this merge.", ""]
     if unchecked:
         lines += ["<details>", "<summary>Not checked "
-                  f"({len(unchecked)})</summary>", ""]
+                  f"({len(unchecked)}) — the check could not be performed "
+                  "for this kind</summary>", ""]
         for kind, ref in unchecked:
             lines.append(f"- `{ref}` ({kind})")
         lines += ["", "</details>", ""]

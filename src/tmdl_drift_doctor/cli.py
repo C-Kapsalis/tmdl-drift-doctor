@@ -1540,7 +1540,11 @@ def freshness_cmd(fleet_path, base_ledger, head_ledger, base_label,
                f"{'y' if len(res['unseen']) == 1 else 'ies'}")
     for (kind, ref), models in res["at_risk"]:
         click.echo(f"at risk: {kind} {ref} in {', '.join(models)}")
-    if res["unseen"] and not res["at_risk"]:
+    if res["not_checked"]:
+        click.echo("the check is incomplete: the kind of "
+                   f"{len(res['not_checked'])} retirement(s) below could not "
+                   "be checked, so this merge is not known to be safe")
+    elif res["unseen"] and not res["at_risk"]:
         click.echo("nothing at risk: none of the unseen retirements is "
                    "present in a derived model")
     for kind, ref in res["not_checked"]:
