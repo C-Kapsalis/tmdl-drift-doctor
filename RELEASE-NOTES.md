@@ -346,6 +346,26 @@
 
 ### Fixed
 
+- **A field-parameter row that points at a retired object is now removed.**
+  A measure retired from the template leaves its field-parameter rows behind
+  in the derived models: the row's `NAMEOF(...)` still names the measure
+  the template deliberately dropped. The tool removed a row that points at
+  nothing at all, but not a row that points at a retired object. The
+  finding `retire.fieldparam_entry` now names the table and the category,
+  and the repair removes exactly those rows — every other row, the row
+  order and the table's own formatting stay as they were.
+- **A missing analysis category is reported.** A field-parameter row names
+  the mapping key it serves (`Account_y`); the mapping table maps that key
+  to an analysis category (`Account`). When the template's field parameters
+  used a category the derived model's mapping table did not carry, the tool
+  said nothing. It now reports `fieldparam.category_missing`, naming the
+  category and the derived model. It is report-only: the mapping table is
+  written by hand.
+- **A mapping table that cannot be decoded fails loudly.** The decode error
+  was swallowed and the whole mapping comparison quietly disappeared, so a
+  model with a corrupt mapping table read as free of mapping drift. The
+  model is now recorded as unreadable: the run names the model and the
+  table on standard error and exits with the parse-failure code.
 - **A reference to a retired table can be repaired.** When a table is
   retired from the template and a derived model still reads it, the tool
   reported the finding `retire.stranded_ref` but had no repair for it: the

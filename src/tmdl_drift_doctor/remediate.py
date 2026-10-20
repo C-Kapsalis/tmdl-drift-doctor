@@ -1000,6 +1000,7 @@ DERIVED_PHASE_KINDS = (
 DESTRUCTIVE_PREFIXES = ("retire.table", "retire.column", "retire.measure",
                         "retire.mapping_row", "retire.mapping_category",
                         "retire.relationship", "retire.stranded_ref",
+                        "retire.fieldparam_entry",
                         "purge.", "column.purge_listed")
 
 

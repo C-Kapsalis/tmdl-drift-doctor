@@ -84,6 +84,17 @@ def test_declared_absent_category_is_not_offered(tmp_path):
 
 
 def test_undecodable_model_string_fails_and_writes_nothing(tmp_path):
+    """An unreadable mapping table is a model the tool could not check.
+
+    Before, the decode error was swallowed and the whole mapping
+    comparison disappeared: the run read as "no mapping drift" about a
+    table the tool never looked at. The model is now recorded as
+    unreadable, and nothing is written.
+    """
+    from tmdl_drift_doctor.baseline import load_baseline
+    from tmdl_drift_doctor.detect import detect_fleet
+    from tmdl_drift_doctor.fleet import load_fleet
+    from tmdl_drift_doctor.ledger import Ledger
     fy, _uni, gro = _pair(tmp_path, [["SEO", "", "seo_x"]],
                           [["SEO", "", "seo_x"]])
     path = zmap_file(gro)
@@ -91,8 +102,12 @@ def test_undecodable_model_string_fails_and_writes_nothing(tmp_path):
     blob = mc._blob(text).group(1)
     path.write_text(text.replace(blob, "QUJDRA=="), encoding="utf-8")
     before = path.read_bytes()
-    _f, res = detect_and_apply(fy, "mapping_category.missing")
-    assert res.count("failed") == 1
+    fleet = load_fleet(fy)
+    errors: list = []
+    detect_fleet(fleet, load_baseline(fleet), Ledger(fleet.ledger_path),
+                 errors=errors)
+    assert errors, "the unreadable table was not reported"
+    assert "cannot be read" in errors[0]["error"], errors
     assert path.read_bytes() == before
 
 

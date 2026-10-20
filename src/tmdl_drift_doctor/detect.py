@@ -76,6 +76,7 @@ REMEDIABLE_KINDS = (
     "retire.mapping_category",
     "retire.relationship",
     "retire.source_view",
+    "retire.fieldparam_entry",
     "purge.fieldparam_entry",
     "purge.measure",
     "purge.column",
@@ -109,7 +110,8 @@ SYNC_ONLY_KINDS = ("purge.fieldparam_entry", "purge.measure", "purge.column",
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
                             "retire.mapping_row", "retire.mapping_category",
-                            "retire.relationship", "retire.source_view")
+                            "retire.relationship", "retire.source_view",
+                            "retire.fieldparam_entry")
 
 # Kinds that fail a gate whatever `allowlist.kinds` says: a model that lost
 # a whole axis table, or live DAX naming a retired table, is never backlog.
@@ -513,6 +515,7 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
     # ── retirements (ledger-proven), with the coupling guard ──
     findings.extend(_retirements(name, model, live, baseline, retire))
     findings.extend(_retired_aliases(name, model, baseline, retire, findings))
+    findings.extend(_retired_fieldparam_entries(name, fleet, model, retire))
     _protect(fleet, findings)
     findings.extend(_revived_decisions(name, model, ledger))
     from .mappings import retirement_findings
@@ -835,6 +838,14 @@ def _retirements(name: str, model: Model, live: dict, baseline: dict,
     return out
 
 
+def _retired_fieldparam_entries(name: str, fleet, model: Model,
+                                retire: dict) -> list:
+    """``retire.fieldparam_entry``: a field-parameter row that points at an
+    object the ledger records as retired."""
+    from .fieldparams import retired_entry_findings
+    return retired_entry_findings(name, fleet, model.definition, retire)
+
+
 def _retired_aliases(name: str, model: Model, baseline: dict, retire: dict,
                      found: list) -> list:
     """A model measure whose core name (one prefix sigil stripped) equals a
@@ -1038,6 +1049,14 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
                 findings.extend(column_purge_findings(name, fleet, findings))
             from .selectors import findings as selector_findings
             findings.extend(selector_findings(name, model))
+            for f in findings:
+                if f.model != name or not f.data.get("error"):
+                    continue
+                # the model carries a table the tool could not read: the run
+                # must not read as "no mapping drift" about it
+                raise DriftDoctorError(
+                    f"the encoded rows of '{f.data.get('table')}' cannot be "
+                    f"read: {f.data['error']}")
         except DriftDoctorError as e:
             if errors is None:
                 raise

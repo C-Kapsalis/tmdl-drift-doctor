@@ -893,6 +893,57 @@ def membership_key(row: Row) -> str:
 
 # ───────────────────────── detection ─────────────────────────
 
+def category_missing_findings(name: str, fleet, definition: Path) -> list:
+    """``fieldparam.category_missing``: a category the template's field
+    parameters use and the derived model's mapping table does not carry.
+
+    A field-parameter row names the mapping key it serves (``Account_y``);
+    the mapping table maps that key to an analysis category (``Account``).
+    When the template's field parameters use a key the derived model's
+    mapping table does not map, that category cannot be sliced in the
+    derived model. It is report-only: the mapping table is written by
+    hand, so the tool says what is missing and stops there.
+    """
+    from .mappings import live_rows
+    tables = fleet.mapping_tables
+    if not tables:
+        return []
+    out = []
+    for table in tables:
+        try:
+            d_rows = live_rows(definition, table)
+            t_rows = live_rows(fleet.template_definition, table)
+        except Exception:
+            continue
+        if not d_rows or not t_rows:
+            continue
+        d_cats = {str(r[0]).strip(): {str(r[-1]).strip() for r in d_rows
+                                     if r} for r in d_rows if r}
+        t_cats = {str(r[0]).strip(): {str(r[-1]).strip() for r in t_rows
+                                     if r} for r in t_rows if r}
+        # the keys the derived model's mapping table knows
+        d_keys = set().union(*d_cats.values()) if d_cats else set()
+        # the keys the template's mapping table maps: a key nobody maps is
+        # not an analysis category, it is a plain dimension
+        t_keys = set().union(*t_cats.values()) if t_cats else set()
+        for stem, path in fieldparam_files(fleet,
+                                           fleet.template_definition).items():
+            for r in read_rows(path)[0]:
+                key = (r.group or "").strip()
+                if not key or key in d_keys or key not in t_keys:
+                    continue
+                cats = sorted(c for c, keys in t_cats.items() if key in keys)
+                label = ", ".join(cats) if cats else key
+                out.append(_f("fieldparam.category_missing", name, key,
+                              f"analysis category '{label}' is used by the "
+                              f"template's field parameters but is absent "
+                              f"from '{name}'s mapping table '{table}' — "
+                              f"its mapping is likely missing. Add the row "
+                              f"by hand",
+                              table=table, category=label, key=key))
+    return out
+
+
 def _f(kind, model, ref, detail, **data):
     from .detect import Finding
     return Finding(kind=kind, model=model, ref=ref, detail=detail, data=data)
@@ -924,6 +975,7 @@ def fieldparam_findings(name: str, fleet, model) -> list:
                               f"template's schema: {plan.describe()}",
                               table=stem))
     out.extend(blank_row_findings(name, fleet, definition))
+    out.extend(category_missing_findings(name, fleet, definition))
     inventory = model_inventory(model)
     out.extend(_row_findings(name, fleet, files, t_files, inventory))
     out.extend(_cross_level_findings(name, fleet, files))
@@ -1033,6 +1085,95 @@ def _dangling(files, inventory) -> list:
         for r in read_rows(path)[0]:
             if not resolves(r, inventory):
                 out.append((stem, r))
+    return out
+
+
+# ───────────────────────── retired targets ─────────────────────────
+
+def retired_targets(retire: dict) -> dict:
+    """{target: kind} of every retired object a field-parameter row can
+    point at.
+
+    A dimension row points at a column (``table``, ``member``); a metric row
+    points at a measure, whose reference is the measure's own name. The
+    ledger's measure refs are ``Table[Measure]``."""
+    out = {}
+    for (kind, ref) in retire or {}:
+        if kind == "measure":
+            table, _sep, member = ref.partition("[")
+            out[(table.rstrip(), member.rstrip("]"))] = kind
+        elif kind == "column":
+            table, _sep, member = ref.partition("[")
+            out[(table.rstrip(), member.rstrip("]"))] = kind
+        elif kind == "table":
+            out[(ref, "")] = kind
+    return out
+
+
+def _row_target_key(row: Row) -> Optional[tuple]:
+    """The (table, member) a row points at, as the ledger spells it.
+
+    A dimension row names its table; a metric row names a measure, whose
+    host table the row does not carry — the measure name alone identifies
+    it, and the ledger's measure ref does too."""
+    tgt = row.target()
+    if tgt is None:
+        return None
+    table, member = tgt
+    if table:
+        return (table, member)
+    return ("", member)
+
+
+def retired_rows(files: dict, retire: dict) -> dict:
+    """{table stem: [(row, category, target ref)]} of the live rows that
+    point at a retired object."""
+    targets = retired_targets(retire)
+    if not targets:
+        return {}
+    measures = {member for (table, member), kind in targets.items()
+                if not table and kind == "measure"}
+    out: dict = {}
+    for stem, path in files.items():
+        hits = []
+        for r in read_rows(path)[0]:
+            key = _row_target_key(r)
+            if key is None:
+                continue
+            table, member = key
+            if table:
+                if (table, member) not in targets:
+                    continue
+                ref = f"{table}[{member}]"
+            else:
+                if member not in measures:
+                    continue
+                ref = member
+            hits.append((r, r.group, ref))
+        if hits:
+            out[stem] = hits
+    return out
+
+
+def retired_entry_findings(name: str, fleet, definition: Path,
+                            retire: dict) -> list:
+    """``retire.fieldparam_entry``: a field-parameter row that points at an
+    object the ledger records as retired. One finding per table and
+    category, naming both."""
+    files = fieldparam_files(fleet, definition)
+    out = []
+    for stem, hits in sorted(retired_rows(files, retire).items()):
+        by_cat: dict = {}
+        for row, cat, ref in hits:
+            by_cat.setdefault(cat, []).append((row, ref))
+        for cat, items in sorted(by_cat.items()):
+            listed = ", ".join(sorted(ref for _r, ref in items))
+            out.append(_f("retire.fieldparam_entry", name, f"{stem}/{cat}",
+                          f"field parameter '{stem}' still offers row(s) "
+                          f"pointing at retired object(s) {listed} "
+                          f"(category '{cat}')",
+                          table=stem, category=cat,
+                          rows=[[r.display, r.ref] for r, _ref in items]))
     return out
 
 
@@ -1162,6 +1303,30 @@ def apply_dangling(fleet, f) -> tuple:
             changes)
 
 
+def apply_retired_entry(fleet, f) -> tuple:
+    """Remove the field-parameter rows that point at a retired object.
+
+    Only the listed rows go: every other row, the row order and the
+    table's own formatting stay as they were."""
+    from .remediate import FileChange
+    mdef = fleet.model_definition(f.model)
+    stem = f.data["table"]
+    path = mdef / "tables" / f"{stem}.tmdl"
+    if not path.is_file():
+        raise DriftDoctorError(f"{path} no longer exists; re-run detect")
+    gone = {(d, r) for d, r in f.data.get("rows") or []}
+    rows, arity = read_rows(path)
+    keep = [r for r in rows if (r.display, r.ref) not in gone]
+    if len(keep) == len(rows):
+        return ("rows already removed", [])
+    old = te.read_text(path)
+    return (f"remove {len(rows) - len(keep)} row(s) of category "
+            f"'{f.data.get('category')}' pointing at a retired object from "
+            f"'{stem}'",
+            [FileChange(path, old, rewrite_rows_text(old, keep, arity,
+                                                     path=path))])
+
+
 APPLIERS = {
     "fieldparam.schema_modernize": apply_schema,
     "fieldparam.blank_row": apply_blank_row,
@@ -1170,6 +1335,7 @@ APPLIERS = {
     "fieldparam.cross_level": apply_cross_level,
     "fieldparam.plot_specific_extra": apply_cross_level,
     "fieldparam.dangling_row": apply_dangling,
+    "retire.fieldparam_entry": apply_retired_entry,
 }
 
 

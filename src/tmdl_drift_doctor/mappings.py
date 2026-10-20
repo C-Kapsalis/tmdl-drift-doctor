@@ -115,6 +115,11 @@ def merge_findings(name: str, fleet, baseline: dict, definition) -> list:
         try:
             d_rows = mc.extract_rows(te.read_text(path))
         except CodecError as e:
+            # A table the tool cannot read is a model it could not check.
+            # The finding says so (it is not a "the category is missing"
+            # claim), and the caller records the model as unreadable so the
+            # run never reads as "no mapping drift" about a table the tool
+            # never looked at.
             out.append(_finding(
                 "mapping_category.missing", name, table,
                 f"the encoded rows of '{table}' cannot be read: {e}",
