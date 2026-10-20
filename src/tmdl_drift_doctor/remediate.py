@@ -1129,7 +1129,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
             for notice in _notices(fleet, f):
                 result.notices.append(notice)
             if f.kind in ("column.missing", "measure.missing"):
-                table = f.ref[:f.ref.rindex("[")]
+                table = split_ref(f.ref)[0]
                 div = state.divergent_tables(f.model)
                 if table in div:
                     from .enrichment import notice as enrich

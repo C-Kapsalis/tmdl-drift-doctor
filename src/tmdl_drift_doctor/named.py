@@ -15,7 +15,7 @@ from typing import Optional
 
 from . import DriftDoctorError, TmdlEditError
 from . import tmdl_edit as te
-from .tmdl import parse_model
+from .tmdl import parse_model, split_ref
 
 
 @dataclass
@@ -39,7 +39,7 @@ class NamedResult:
 
 def _split(ref: str) -> tuple:
     if ref.endswith("]") and "[" in ref:
-        i = ref.rindex("[")
+        i = ref.find("[")
         return ref[:i], ref[i + 1:-1]
     return None, ref
 

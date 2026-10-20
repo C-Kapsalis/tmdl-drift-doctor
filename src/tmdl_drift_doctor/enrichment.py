@@ -16,6 +16,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from .detect import split_ref
+
 REGISTRY = "view_enrichment_outstanding.json"
 REPORT = "view_enrichment_report.json"
 
@@ -23,13 +25,13 @@ REPORT = "view_enrichment_report.json"
 def notice(fleet, baseline: dict, f, template_view, model_view) -> dict:
     """The payload of one splice onto a source-divergent table."""
     if f.kind == "column.missing":
-        table, col = f.ref[:f.ref.rindex("[")], f.ref[f.ref.rindex("[") + 1:-1]
+        table, col = split_ref(f.ref)
         props = (((baseline.get("tables") or {}).get(table) or {})
                  .get("columns") or {}).get(col) or {}
         source = (props.get("sourceColumn") or col).strip().strip("[]")
         item = {"column": {"name": col, "sourceColumn": source}}
     else:
-        table, name = f.ref[:f.ref.rindex("[")], f.ref[f.ref.rindex("[") + 1:-1]
+        table, name = split_ref(f.ref)
         item = {"measure": name}
     rel = _rel(fleet, f.model)
     return {"model": f.model, "model_path": rel, "table": table,

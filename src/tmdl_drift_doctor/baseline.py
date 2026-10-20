@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import StaleBaselineError, __version__
+from .detect import split_ref
 from .fleet import Fleet
 from .ledger import Ledger
 from .mapping_codec import is_encoded
@@ -171,7 +172,7 @@ def kind_inventory(snapshot: dict) -> dict:
 
 def _host_table(kind: str, ref: str) -> str:
     if kind in ("column", "measure"):
-        return ref[:ref.rindex("[")]
+        return split_ref(ref)[0]
     if kind == "mapping_row":
         return ref[:ref.rindex("/")]
     return ref

@@ -40,6 +40,7 @@ from .tmdl import (
     parse_model,
     unquote,
 )
+from .tmdl import split_ref as _split_ref
 
 # Kinds remediation can apply (subject to the allowlist).
 REMEDIABLE_KINDS = (
@@ -204,9 +205,8 @@ def _clip(value, n: int = 120) -> str:
 
 
 def split_ref(ref: str) -> tuple:
-    """``Table[Name]`` -> (Table, Name)."""
-    i = ref.rindex("[")
-    return ref[:i], ref[i + 1:-1]
+    """``Table[Name]`` -> (Table, Name). See ``tmdl.split_ref``."""
+    return _split_ref(ref)
 
 
 # ───────────────────── dependency (coupling) analysis ─────────────────────
@@ -977,7 +977,7 @@ def finding_files(fleet: Fleet, f: Finding) -> list:
         ref = f.ref
         if "->" in ref:
             return [f"{defn}/relationships.tmdl"]
-        table = ref[:ref.rindex("[")] if ref.endswith("]") and "[" in ref \
+        table = split_ref(ref)[0] if ref.endswith("]") and "[" in ref \
             else ref.split("/", 1)[0]
     out = [f"{defn}/tables/{table}.tmdl"]
     if f.kind == "measure.wrong_host":

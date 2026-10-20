@@ -31,6 +31,7 @@ from typing import Optional
 
 from . import mapping_codec as mc
 from . import tmdl_edit as te
+from .detect import split_ref
 from .tmdl import dax_references, normalize_expression, parse_model
 
 PURGE_KINDS = ("purge.fieldparam_entry", "purge.measure", "purge.column",
@@ -508,7 +509,7 @@ def column_purge_findings(name: str, fleet, findings: list) -> list:
     for f in findings:
         if f.model != name or f.kind != "extra.column":
             continue
-        table, col = f.ref[:f.ref.rindex("[")], f.ref[f.ref.rindex("[") + 1:-1]
+        table, col = split_ref(f.ref)
         if col not in names or f.ref in exceptions or table in fp:
             continue
         out.append(_f("column.purge_listed", name, f.ref,

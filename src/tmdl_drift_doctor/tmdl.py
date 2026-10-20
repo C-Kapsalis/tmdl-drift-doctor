@@ -90,6 +90,22 @@ def strip_bom(text: str) -> str:
     return text[1:] if text.startswith("﻿") else text
 
 
+def split_ref(ref: str) -> tuple:
+    """``Table[Name]`` -> (Table, Name).
+
+    The reference is split at its FIRST bracket: the table name comes first
+    and the object name follows, and the object name may itself hold a
+    bracket (``Sales[Joe's Ünï [Proj]]``). Splitting at the last bracket
+    would read the table as ``Sales[Joe's Ünï`` and the object as
+    ``Proj]``, and the fixer would then look for a table file whose name was
+    built from the middle of the reference.
+    """
+    i = ref.find("[")
+    if i < 0:
+        return ref, ""
+    return ref[:i], ref[i + 1:-1]
+
+
 def unquote(name: str) -> str:
     """Strip TMDL identifier quoting: 'My Name' -> My Name (with '' -> ')."""
     name = name.strip()

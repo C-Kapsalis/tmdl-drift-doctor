@@ -346,6 +346,15 @@
 
 ### Fixed
 
+- **An object whose name holds a square bracket can be remediated.** The
+  reference of an object is a table name and an object name joined with
+  brackets, and a name may legitimately hold a bracket of its own
+  (`Sales[Joe's Ünï [Proj]]`). The reference was read at its last bracket, so
+  the table became `Sales[Joe's Ünï` and the object became `Proj]`; the fix
+  then looked for a table file whose name was built from the middle of the
+  reference, and the drift could never be fixed. The reference is now read
+  at its first bracket, so the table and the object are found as they are
+  written, and the cascade copies the block into the model as it should.
 - **A fixer no longer changes a model's line endings.** A fleet committed
   from Windows comes back from a fix with Unix line endings, and the diff
   shows the whole file instead of the change that was asked for. The

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from . import DriftDoctorError
+from .detect import split_ref
 from .fleet import Fleet
 from .ledger import Ledger
 from .tmdl import Model, parse_mapping_rows, parse_model
@@ -49,7 +50,7 @@ def _present(model: Model, family: str, ref: str) -> bool:
     if family == "table":
         return ref in model.tables
     if family in ("column", "measure"):
-        t, n = ref[:ref.rindex("[")], ref[ref.rindex("[") + 1:-1]
+        t, n = split_ref(ref)
         return (model.column(t, n) if family == "column"
                 else model.measure(t, n)) is not None
     if family == "mapping_row":

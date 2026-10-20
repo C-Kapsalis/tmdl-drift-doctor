@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Optional
 
 from . import DriftDoctorError
+from .detect import split_ref
 from .fleet import Fleet, Override
 from .ledger import Ledger
 from .tmdl import parse_signature
@@ -39,7 +40,7 @@ SUPPRESSES = {
 
 
 def _bare(ref: str) -> str:
-    return ref[ref.rindex("[") + 1:-1] if ref.endswith("]") and "[" in ref \
+    return split_ref(ref)[1] if ref.endswith("]") and "[" in ref \
         else ref
 
 
@@ -157,7 +158,7 @@ def resolve_for_model(fleet: Fleet, model: str) -> dict:
            "fieldparam_entries": {}, "mapping_rows": {}, "files": []}
     for o in fleet.overrides.get(model) or ():
         if o.section == "columns":
-            table, col = o.object[:o.object.rindex("[")], _bare(o.object)
+            table, col = split_ref(o.object)[0], _bare(o.object)
             if o.kind == "absent":
                 out["columns_absent"].setdefault(table, {})[col] = o.meta()
             else:
