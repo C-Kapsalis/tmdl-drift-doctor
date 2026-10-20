@@ -549,6 +549,28 @@ def _refuse(problems):
     sys.exit(2)
 
 
+def _refuse_retirement_allowance(floors: dict) -> None:
+    """A floors file that grants a retirement allowance is a configuration
+    error, never a drift rise.
+
+    Resurrections are hard zero: an object the ledger proves was retired
+    must never come back, and a floor must never license it. The tool never
+    writes such a key, so one in the file is a hand edit — and a CI job
+    must not read it as ordinary backlog growth. Both ratchet commands
+    refuse with exit 2, naming the model and the value.
+    """
+    from .ratchet import HARD_ZERO, allowances
+    problems = [
+        f"{name}: the floors file grants a retire allowance "
+        f"({HARD_ZERO}: {value}); resurrections are hard zero. Remove the "
+        f"key and remediate the model instead (`drift-doctor remediate "
+        f"--model {name} --kind retire --sync`)"
+        for name, value in allowances(floors)
+    ]
+    if problems:
+        _refuse(problems)
+
+
 _from_json = click.option(
     "--from-json", default=None, metavar="FILE",
     help="Use a saved `detect --json` report instead of detecting now.")
@@ -609,6 +631,7 @@ def ratchet_check(fleet_path, from_json, allow_stale, total_only,
     if floors is None:
         _refuse([f"no floors file at {fleet.floors_path}; seed it with "
                  f"`drift-doctor ratchet tighten` and commit it"])
+    _refuse_retirement_allowance(floors)
     if include_advisory:
         for body in (report.get("models") or {}).values():
             for f in body.get("findings") or ():
@@ -659,7 +682,7 @@ def ratchet_tighten(fleet_path, from_json, allow_stale, total_only, allow_new,
                     prune) -> None:
     """Lower every floor to min(floor, current). Never raises a floor. A
     model-scoped report lowers only its own models' floors."""
-    from .ratchet import (TOTALS_FILE, allowances, load_floors,
+    from .ratchet import (TOTALS_FILE, load_floors,
                           report_problems, save_floors, tighten, totals)
     fleet = _load(fleet_path)
     report = _ratchet_report(fleet, from_json, allow_stale)
@@ -677,12 +700,8 @@ def ratchet_tighten(fleet_path, from_json, allow_stale, total_only, allow_new,
         floors = load_floors(fleet.floors_path)
     except DriftDoctorError as e:
         _refuse([str(e)])
-    if floors is not None and allowances(floors):
-        for name, value in allowances(floors):
-            click.echo(f"ERROR: {name}: the floors file grants a retire "
-                       f"allowance (retire: {value}); remove it and remediate "
-                       f"the model instead", err=True)
-        sys.exit(1)
+    if floors is not None:
+        _refuse_retirement_allowance(floors)
     doc, changes, notes = tighten(report, floors, allow_new=allow_new,
                                   prune=prune, fleet_models=list(fleet.models))
     for line in changes:

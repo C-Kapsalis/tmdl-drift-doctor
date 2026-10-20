@@ -203,15 +203,6 @@ def check(report: dict, floors_doc: dict, gating: dict) -> CheckResult:
     floors = floors_doc.get("models") or {}
     current = counts(report)
     raised = resurrections(report)
-    for name, value in allowances(floors_doc):
-        line = (f"{name}: the floors file grants a retire allowance "
-                f"({HARD_ZERO}: {value}); resurrections are hard zero. Remove "
-                f"the key and remediate the model instead (`drift-doctor "
-                f"remediate --model {name} --kind retire --sync`)")
-        if _gating(report, gating, name) == "advisory":
-            res.advisories.append(line)
-        else:
-            res.violations.append(line)
     for name in sorted(current):
         advisory = _gating(report, gating, name) == "advisory"
         block = []

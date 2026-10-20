@@ -46,12 +46,39 @@ def _fleet(tmp_path):
 
 def test_retire_items_fail_even_when_the_floor_would_allow_them(tmp_path):
     """The exact escape hatch that must not exist: a floor generous enough to
-    swallow the resurrection. Under the old logic 5 <= 5 was green."""
+    swallow the resurrection. Under the old logic 5 <= 5 was green.
+
+    A floors file that grants a retirement allowance is a configuration
+    error in its own right (H-ratchet-check §1: exit 2, the model and the
+    value named), so the run refuses before it compares anything. The
+    resurrection itself is still hard zero, and the allowance is what makes
+    the refusal possible: without it, the same report fails with the
+    resurrection banner.
+    """
     fy = _fleet(tmp_path)
     dump = write_report(tmp_path / "d.json", {"spinout-10": [
         item("retire.relationship", sig) for sig in RESURRECTED]},
         generated_at="2026-08-10T00:00:00+00:00")
     write_floors(fy, {"spinout-10": {"total": 99, "by_category": {"retire": 99}}})
+
+    r = check(fy, dump)
+
+    assert r.exit_code == 2, r.output
+    assert "spinout-10" in r.stderr
+    assert "retire" in r.stderr
+    # And it must NOT read like ordinary backlog growth.
+    assert "[RISE]" not in r.stdout
+    assert "category 'retire' rose" not in r.stdout
+
+
+def test_a_resurrection_fails_even_with_a_clean_floor(tmp_path):
+    """The same report with a floors file that grants no allowance: the
+    resurrection is named, in full, and the run is red."""
+    fy = _fleet(tmp_path)
+    dump = write_report(tmp_path / "d.json", {"spinout-10": [
+        item("retire.relationship", sig) for sig in RESURRECTED]},
+        generated_at="2026-08-10T00:00:00+00:00")
+    write_floors(fy, {"spinout-10": {"total": 99, "by_category": {}}})
 
     r = check(fy, dump)
 
@@ -122,16 +149,14 @@ def test_the_committed_floors_carry_no_retire_allowance():
 
 def test_a_retire_allowance_in_floors_is_refused(tmp_path):
     """Negative case for the committed-floors rule (H-ratchet-check Cases 4 /
-    Detection 1): a floors file with `retire: 1` is flagged, naming the model.
-
-    The spec asks for exit 2 here, but the original tests above (and
-    test_advisory_gating) require exit 1 when a resurrection meets a
-    `retire: 99` floor, so only "fails and names the model" is pinned; see
-    PORT-LOG "spec conflict"."""
+    Detection 1): a floors file with `retire: 1` is a configuration error —
+    exit 2, the model and the value named on standard error, and the run
+    prints no findings summary."""
     fy = _fleet(tmp_path)
     dump = write_report(tmp_path / "d.json", {"spinout-10": [], "spinout-02": []})
     write_floors(fy, {"spinout-10": {"total": 1, "by_category": {"retire": 1}},
                       "spinout-02": {"total": 0, "by_category": {}}})
     r = check(fy, dump)
-    assert r.exit_code != 0, r.output
-    assert "spinout-10" in r.output and "retire" in r.output
+    assert r.exit_code == 2, r.output
+    assert "spinout-10" in r.stderr and "retire" in r.stderr
+    assert "[RISE]" not in r.stdout

@@ -179,11 +179,30 @@ def test_advisory_resurrection_is_reported_but_not_fatal(fy, tmp_path):
 
 
 def test_resurrection_on_a_gated_client_is_untouched(fy, tmp_path):
-    """The flag must not have widened the retirement escape hatch by accident
-    (allowlist omits `retire.*`, the floor records `retire: 99`)."""
+    """The flag must not have widened the retirement escape hatch by accident.
+
+    A floors file that records `retire: 99` is a configuration error in its
+    own right (H-ratchet-check §1): the run refuses with exit 2, naming the
+    model and the value. The resurrection itself is still hard zero — with a
+    floor that grants no allowance, the same report fails with the
+    resurrection banner.
+    """
     dump = _dump(tmp_path / "d.json", {
         GATED_CLIENT: [item("retire.table", "Google Ads Keywords Quality")]})
     write_floors(fy, {GATED_CLIENT: {"total": 99, "by_category": {"retire": 99}}})
+
+    r = check(fy, dump)
+
+    assert r.exit_code == 2, r.output
+    assert GATED_CLIENT in r.stderr
+    assert "[RISE]" not in r.stdout
+
+
+def test_a_resurrection_on_a_gated_client_fails_with_a_clean_floor(fy, tmp_path):
+    """The hard-zero rule itself: no floor may swallow a resurrection."""
+    dump = _dump(tmp_path / "d.json", {
+        GATED_CLIENT: [item("retire.table", "Google Ads Keywords Quality")]})
+    write_floors(fy, {GATED_CLIENT: {"total": 99, "by_category": {}}})
 
     r = check(fy, dump)
 

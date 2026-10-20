@@ -346,6 +346,14 @@
 
 ### Fixed
 
+- **A floors file that grants a retirement allowance is refused, not
+  reported as a rise.** Resurrections are hard zero, so a floor may never
+  license one, and the tool never writes such a key: one in the file is a
+  hand edit. `ratchet check` and `ratchet tighten` now exit 2 and name the
+  model and the value on standard error, leaving the file byte-for-byte
+  alone, instead of exiting 1 with a `[RISE]` line on standard output —
+  which read as ordinary backlog growth. The legacy per-kind form of the
+  floors file is refused the same way.
 - **A stale baseline now exits 2, not 1.** When the committed baseline no
   longer matches the live template, the findings computed against it are
   misclassified (a retired object looks missing and gets resurrected). The
