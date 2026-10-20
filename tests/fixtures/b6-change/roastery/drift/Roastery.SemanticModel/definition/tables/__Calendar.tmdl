@@ -1,0 +1,23 @@
+table __Calendar
+	lineageTag: 00022547-c0ff-ee00-0000-000000022547
+
+	column Date
+		dataType: dateTime
+		lineageTag: 00011336-c0ff-ee00-0000-000000011336
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column Month
+		dataType: string
+		lineageTag: 00013431-c0ff-ee00-0000-000000013431
+		summarizeBy: none
+		sourceColumn: Month
+
+		annotation SummarizationSetBy = Automatic
+
+	partition __Calendar = calculated
+		mode: import
+		source = CALENDAR(DATE(2025,1,1), DATE(2025,12,31))
+

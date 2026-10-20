@@ -1,0 +1,7 @@
+relationship 1111aaaa-0000-0000-0000-000000000001
+	fromColumn: Roasts.bean_id
+	toColumn: Beans.bean_id
+
+relationship 1111aaaa-0000-0000-0000-000000000002
+	fromColumn: Roasts.roast_date
+	toColumn: __Calendar.Date

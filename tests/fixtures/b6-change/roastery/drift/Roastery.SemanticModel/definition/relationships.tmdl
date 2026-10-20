@@ -1,0 +1,4 @@
+relationship 1111aaaa-0000-0000-0000-000000000001
+	crossFilteringBehavior: bothDirections
+	fromColumn: Roasts.bean_id
+	toColumn: Beans.bean_id

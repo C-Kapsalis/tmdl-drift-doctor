@@ -30,6 +30,8 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `source_identity` | `{function, db_parameter}` | none (detection off) | How a table's source view is read: the first string argument of the source-function call (bare or `#"quoted"`), or the view folded into an inline query after the database parameter. With the block, a table reading another view than the template's is source-divergent. |
 | `notify_command` | shell command | none | Receives the run's view-enrichment entries as JSON on stdin, once per `remediate` run that produced any. |
 | `incremental_refresh` | `{enabled, fact_pattern, exempt}` | on; fact tables by role; `[]` | Which fact tables follow the template's incremental-refresh policy and window. |
+| `purge` | `{enabled, infrastructure_fraction}` | off; `0.5` | The pristine-category purge (`detect --sync`, `remediate --sync`). A table serving at least this fraction of all mapping categories is shared infrastructure and never decides a category. |
+| `protected_name_pattern` | regular expression (case-insensitive) | none | Names (display, table, column, category, key) no removal path ever touches and no digest nags about. |
 | `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |
 | `renames.columns` | mapping `Table.Old` -> `Table.New` | `{}` | Column renames (split at the last dot; cross-table moves are ignored). |
 | `renames.profiles` | mapping name -> `{measures, columns}` | `{}` | Alternative maps; a model selecting one (`rename_profile`) uses it INSTEAD of the default maps. |

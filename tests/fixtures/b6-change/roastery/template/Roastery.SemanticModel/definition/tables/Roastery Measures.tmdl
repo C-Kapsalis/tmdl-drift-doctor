@@ -1,0 +1,32 @@
+table 'Roastery Measures'
+	lineageTag: 00063422-c0ff-ee00-0000-000000063422
+
+	measure 'Total Kilos' = SUM(Roasts[kilos])
+		formatString: #,0
+		lineageTag: 00042202-c0ff-ee00-0000-000000042202
+
+	measure 'Total Batches' = SUM(Roasts[batches])
+		formatString: #,0
+		lineageTag: 00047925-c0ff-ee00-0000-000000047925
+
+	measure 'Kilos per Batch' = DIVIDE([Total Kilos],[Total Batches])
+		formatString: #,0
+		lineageTag: 00052668-c0ff-ee00-0000-000000052668
+
+	measure 'Bean Origins #' = COUNTROWS(Beans)
+		formatString: #,0
+		lineageTag: 00047016-c0ff-ee00-0000-000000047016
+
+	column z
+		dataType: string
+		isHidden
+		lineageTag: 00018918-c0ff-ee00-0000-000000018918
+		summarizeBy: none
+		sourceColumn: z
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Roastery Measures' = calculated
+		mode: import
+		source = ROW("z", BLANK())
+

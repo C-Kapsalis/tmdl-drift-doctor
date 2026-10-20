@@ -1,0 +1,4 @@
+expression v-fromdate = #date(2025, 1, 1) meta [IsParameterQuery = true, IsParameterQueryRequired = false, Type = "Date"]
+	lineageTag: 0000aaaa-c0ff-ee00-0000-000000000001
+
+	annotation PBI_ResultType = Date

@@ -124,12 +124,13 @@ def view_chain(ledger) -> dict:
     return out
 
 
-def source_view_findings(name: str, fleet, model, ledger, digest=None) -> list:
+def source_view_findings(name: str, fleet, model, ledger) -> list:
     """``retire.source_view``: a table the template re-pointed that this
     model still reads through the old view. A model on a view it declares
     (``source_views`` override) is retained; one on some other view is left
-    for a person. Both decisions go to the digest, never to a finding."""
-    from .detect import Finding
+    for a person. Both are ``decision`` items (the run digest), never a
+    fix."""
+    from .detect import Finding, decision
     chain = view_chain(ledger)
     if not chain:
         return []
@@ -158,8 +159,6 @@ def source_view_findings(name: str, fleet, model, ledger, digest=None) -> list:
             continue
         if any(n == view for _o, n in steps):
             continue                     # an intermediate view: a later step
-        if digest is None:
-            continue
         if table in declared:
             note = (f"retained by the model's source_views override "
                     f"(declared view '{declared[table]}'); the template moved "
@@ -168,6 +167,6 @@ def source_view_findings(name: str, fleet, model, ledger, digest=None) -> list:
             note = (f"needs-decision: '{name}' reads '{view}', neither the "
                     f"template's old nor its new view ('{final}'); left "
                     f"untouched")
-        digest.append({"model": name, "kind": "source_view", "name": table,
-                       "report_refs": None, "note": note})
+        out.append(decision(name, "source_view", table, note,
+                            for_kind="retire.source_view"))
     return out

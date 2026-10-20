@@ -557,7 +557,18 @@ def _apply_source_view(fleet: Fleet, f: Finding) -> tuple:
             [FileChange(path, old, new)])
 
 
+def _apply_purge(fleet: Fleet, f: Finding) -> tuple:
+    from .purge import apply_purge
+    return apply_purge(fleet, f)
+
+
 APPLIERS: dict = {
+    "purge.fieldparam_entry": _apply_purge,
+    "purge.measure": _apply_purge,
+    "purge.column": _apply_purge,
+    "purge.relationship": _apply_purge,
+    "purge.zmap_row": _apply_purge,
+    "purge.table": _apply_purge,
     "retire.source_view": _apply_source_view,
     "refresh_policy.missing": _apply_refresh,
     "refresh_policy.window_drift": _apply_refresh,
@@ -793,6 +804,8 @@ PHASES = (
     "relationship.casing_mismatch", "retire.relationship", "retire.measure",
     "retire.mapping_row", "retire.mapping_category", "retire.source_view",
     "retire.column", "retire.table",
+    "purge.fieldparam_entry", "purge.measure", "purge.column",
+    "purge.relationship", "purge.zmap_row", "purge.table",
 )
 
 
@@ -882,8 +895,18 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
     def out(f, status, reason="", changes=None):
         result.outcomes.append(Outcome(f, status, reason, changes or []))
 
+    def wanted(f):
+        k = f.data.get("for_kind", f.kind) if f.kind == "decision" else f.kind
+        return not kinds or any(kind_matches(k, x) for x in kinds)
+
+    for f in findings:
+        if f.kind == "decision" and wanted(f):
+            result.digest.append({"model": f.model, "kind": f.data["kind"],
+                                  "name": f.data["name"],
+                                  "report_refs": f.data.get("report_refs"),
+                                  "note": f.data["note"]})
     admitted = [f for f in sorted(findings, key=_phase)
-                if not kinds or any(kind_matches(f.kind, k) for k in kinds)]
+                if f.kind != "decision" and wanted(f)]
     overlay = OverlayWatch(fleet)
     for model in dict.fromkeys(f.model for f in admitted):
         overlay._scan(model)

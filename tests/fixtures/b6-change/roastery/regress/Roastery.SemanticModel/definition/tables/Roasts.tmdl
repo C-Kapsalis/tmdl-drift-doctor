@@ -1,0 +1,49 @@
+table Roasts
+	lineageTag: 00009431-c0ff-ee00-0000-000000009431
+
+	column roast_date
+		dataType: dateTime
+		isHidden
+		lineageTag: 00015855-c0ff-ee00-0000-000000015855
+		summarizeBy: none
+		sourceColumn: roast_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column bean_id
+		dataType: int64
+		isHidden
+		lineageTag: 00010432-c0ff-ee00-0000-000000010432
+		summarizeBy: none
+		sourceColumn: bean_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column kilos
+		dataType: double
+		isHidden
+		lineageTag: 00008136-c0ff-ee00-0000-000000008136
+		summarizeBy: none
+		sourceColumn: kilos
+
+		annotation SummarizationSetBy = Automatic
+
+	column batches
+		dataType: int64
+		isHidden
+		lineageTag: 00010731-c0ff-ee00-0000-000000010731
+		summarizeBy: none
+		sourceColumn: batches
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Roasts-0001 = m
+		mode: import
+		source =
+				let
+				    Source = source_filter_dates("roasts_n", "date", false, #"v-fromdate", 0, 0, 0)
+				in
+				    Source
+
+	annotation PBI_ResultType = Table
+

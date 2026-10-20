@@ -127,10 +127,13 @@ def capture(fleet_path) -> None:
               help="Only findings whose kind starts with this prefix.")
 @click.option("--csv", "as_csv", is_flag=True,
               help="One CSV row per model: shape and drift by bucket.")
+@click.option("--sync", is_flag=True,
+              help="Also report the sync-only channel (pristine-category "
+                   "purge items).")
 @click.option("--allow-stale", is_flag=True,
               help="Proceed even if the template changed since the last "
                    "capture (misclassification risk — see the docs).")
-def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
+def detect(fleet_path, as_json, model_filter, kind_filter, as_csv, sync,
            allow_stale) -> None:
     """Detect drift in every derived model. Read-only.
 
@@ -138,7 +141,18 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
     not overridden, on a model whose gating is not advisory); 3 when a model
     could not be parsed. Wire it straight into CI."""
     fleet = _load(fleet_path)
-    baseline = _fresh_baseline(fleet, allow_stale)
+    if not fleet.baseline_path.exists():
+        # nothing captured yet: compare against the live template (never
+        # stale) without writing anything
+        from .baseline import build_snapshot
+        from .tmdl import parse_model
+        click.echo("note: no baseline captured yet; comparing against the "
+                   "live template. Run `drift-doctor capture` to commit one.",
+                   err=True)
+        baseline = build_snapshot(parse_model(fleet.template_definition),
+                                  fleet.mapping_tables, fleet.raw)
+    else:
+        baseline = _fresh_baseline(fleet, allow_stale)
     if (kind_filter or "").rstrip(".") == "retire.stranded_ref" and not any(
             k == "table" for k, _r in
             Ledger(fleet.ledger_path).active_retirements()):
@@ -154,7 +168,7 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
             raise ConfigError(f"the blank-row check was requested but {e}")
     errors: list = []
     findings = _detect(fleet, baseline, errors, model_filter=model_filter,
-                       kind_filter=kind_filter)
+                       kind_filter=kind_filter, sync=sync)
     from .cascade import CSV_HEADER, in_cascade, summarize
     names = [model_filter] if model_filter else list(fleet.models)
     if as_json:
@@ -198,6 +212,11 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv,
 
 
 def _print_findings(fleet, findings, errors, model_filter, kind_filter):
+    decisions = [f for f in findings if f.kind == "decision"]
+    findings = [f for f in findings if f.kind != "decision"]
+    for d in decisions:
+        click.echo(f"[decision] {d.model}: {d.data['kind']} {d.ref} — "
+                   f"{d.detail}")
     shown = [f for f in findings if not f.overridden]
     if not shown and not errors:
         scope = []
@@ -312,12 +331,8 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
         sys.exit(USAGE_EXIT)
     fleet = _load(fleet_path)
     baseline = _fresh_baseline(fleet, allow_stale)
-    decisions: list = []
-
     def detect_once():
-        decisions.clear()
-        return _detect(fleet, baseline, model_filter=model_filter,
-                       digest=decisions)
+        return _detect(fleet, baseline, model_filter=model_filter, sync=sync)
 
     terminal = stdin_is_interactive()
     deletions_ok = sync and (confirm_deletions or (terminal and not assume_yes))
@@ -365,11 +380,11 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
         click.echo("note: --converge has no effect with --dry-run (nothing "
                    "changes on disk between passes); showing one pass.")
     if digest_json:
-        entries = list(decisions) + [d for r in results for d in r.digest]
+        entries = [d for r in results for d in r.digest]
         Path(digest_json).write_text(json.dumps(
             {"entries": entries}, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8")
-    for d in decisions:
+    for d in (results[-1].digest if results else []):
         click.echo(f"[decision] {d['model']}: {d['kind']} {d['name']} — "
                    f"{d['note']}")
     if not dry_run:

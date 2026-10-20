@@ -1,0 +1,30 @@
+table Beans
+	lineageTag: 00006364-c0ff-ee00-0000-000000006364
+
+	column bean_id
+		dataType: int64
+		isHidden
+		lineageTag: 00008928-c0ff-ee00-0000-000000008928
+		summarizeBy: none
+		sourceColumn: bean_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column origin
+		dataType: string
+		lineageTag: 00007995-c0ff-ee00-0000-000000007995
+		summarizeBy: none
+		sourceColumn: origin
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Beans-0001 = m
+		mode: import
+		source =
+				let
+				    Source = source_filter_dates("beans_n", "date", false, #"v-fromdate", 0, 0, 0)
+				in
+				    Source
+
+	annotation PBI_ResultType = Table
+

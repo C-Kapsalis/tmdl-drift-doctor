@@ -75,6 +75,12 @@ REMEDIABLE_KINDS = (
     "retire.mapping_category",
     "retire.relationship",
     "retire.source_view",
+    "purge.fieldparam_entry",
+    "purge.measure",
+    "purge.column",
+    "purge.relationship",
+    "purge.zmap_row",
+    "purge.table",
 )
 
 # Kind families whose findings carry a per-category suffix
@@ -93,7 +99,8 @@ ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra",
                   "extra.mapping_row")
 
 # Kinds detection offers only in --sync mode (the purge channel).
-SYNC_ONLY_KINDS = ()
+SYNC_ONLY_KINDS = ("purge.fieldparam_entry", "purge.measure", "purge.column",
+                   "purge.relationship", "purge.zmap_row", "purge.table")
 
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
@@ -153,10 +160,22 @@ class Finding:
         return d
 
 
+def decision(model: str, kind: str, name: str, note: str, *,
+             for_kind: str = "", report_refs=None) -> Finding:
+    """A call routed to a person: never a fix, never counted; the engine
+    turns it into a digest entry (``RunResult.digest``)."""
+    return Finding(kind="decision", model=model, ref=name, detail=note,
+                   data={"kind": kind, "name": name, "note": note,
+                         "report_refs": report_refs,
+                         "for_kind": for_kind or kind})
+
+
 def is_actionable(f: Finding, fleet: Fleet) -> bool:
     """THE predicate shared by detect's exit code, the ratchet and review:
     a finding is actionable when its kind is allowlisted, it is not
     advisory, and no override acknowledges it."""
+    if f.kind == "decision":
+        return False
     return ((fleet.allows(f.kind) or f.kind in ALWAYS_GATING
              or _missing_axis_table(f, fleet))
             and not f.advisory and not f.overridden)
@@ -869,7 +888,7 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
                  model_filter: Optional[str] = None,
                  kind_filter: Optional[str] = None,
                  errors: Optional[list] = None,
-                 digest: Optional[list] = None) -> list:
+                 sync: bool = False) -> list:
     """Findings for every (or one) derived model, overrides applied.
 
     When `errors` is a list, a model that cannot be parsed is recorded there
@@ -895,14 +914,20 @@ def detect_fleet(fleet: Fleet, baseline: dict, ledger: Ledger,
                                          model))
             findings.extend(annotation_findings(name, fleet, cache))
             findings.extend(refresh_findings(name, fleet, model, policies))
-            findings.extend(source_view_findings(name, fleet, model, ledger,
-                                                 digest))
+            findings.extend(source_view_findings(name, fleet, model, ledger))
+            if sync:
+                from .purge import purge_findings
+                findings.extend(purge_findings(name, fleet, baseline, model,
+                                               ledger))
         except DriftDoctorError as e:
             if errors is None:
                 raise
             errors.append({"model": name, "error": str(e)})
     if kind_filter:
-        findings = [f for f in findings if kind_matches(f.kind, kind_filter)]
+        findings = [f for f in findings
+                    if kind_matches(f.data.get("for_kind", f.kind)
+                                    if f.kind == "decision" else f.kind,
+                                    kind_filter)]
     return apply_overrides(fleet, findings)
 
 
@@ -955,10 +980,13 @@ def build_report(fleet: Fleet, findings: list, errors: list,
     models = {}
     for name in names:
         items = [f for f in findings if f.model == name]
+        decisions = [f for f in items if f.kind == "decision"]
+        items = [f for f in items if f.kind != "decision"]
         models[name] = {
             "source_divergent_tables": divergence_report(fleet, name,
                                                          baseline),
             "gating": fleet.gating.get(name, "enforced"),
+            "decisions": [dict(f.data, model=name) for f in decisions],
             "findings": [dict(f.to_dict(), actionable=is_actionable(f, fleet))
                          for f in items if not f.overridden],
             "overridden": [f.to_dict() for f in items if f.overridden],

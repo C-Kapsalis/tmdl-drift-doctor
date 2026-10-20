@@ -204,6 +204,22 @@
   override) is retained and one on some other view is left for a person;
   both are written to the decision digest (`remediate --digest-json FILE`).
 
+- **Pristine-category purge (`purge.*`, sync mode).** With `purge.enabled`,
+  `detect --sync` / `remediate --sync` remove model-only field-parameter
+  rows, measures, columns, mapping keys, relationships and tables of an
+  analysis category the model never customised. A category is customised
+  when the model reads one of its tables through its own source view and
+  wires that table to a table of its own. Protected names
+  (`protected_name_pattern`), override retentions and data extensions are
+  kept. Deletions: never under `--yes`.
+- **Decisions.** Calls routed to a person (a retained source view, a kept
+  row in a customised category, a measure still referenced) are
+  `decision` items: `detect` prints them, `detect --json` lists them per
+  model under `decisions`, and `remediate` collects them in the run digest
+  (`--digest-json`). They never fail a gate.
+- **`detect` works before the first capture**, comparing against the live
+  template without writing anything (a note says so).
+
 ### Changed
 
 - **`measure.wrong_host` is one finding per measure.** A template measure
