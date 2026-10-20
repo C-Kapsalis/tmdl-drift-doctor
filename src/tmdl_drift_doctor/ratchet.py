@@ -384,13 +384,14 @@ def tighten(report: dict, floors_doc: Optional[dict], *, allow_new: bool,
                 continue
             del new[name]
             changes.append(f"{name}: pruned (no longer in the fleet)")
-    if not seeding and new == old:
-        return None, changes, notes
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     doc = {k: v for k, v in (floors_doc or {}).items()
            if k not in ("models", "version")}
     doc["version"] = FLOORS_VERSION
     if fleet or seeding:
+        # A fleet tighten re-stamps the file: the fleet was measured now, at
+        # this template tree. A no-op tighten measures the fleet just as
+        # much, so it re-stamps too.
         doc["updated_at"] = now
         doc["template_tree"] = report.get("template_tree")
     doc["last_tighten"] = {"scope": "fleet" if fleet else "scoped",
@@ -398,6 +399,11 @@ def tighten(report: dict, floors_doc: Optional[dict], *, allow_new: bool,
                            "template_tree": report.get("template_tree"),
                            "at": now}
     doc["models"] = new
+    if not seeding and new == old:
+        # Nothing was lowered, but the provenance still moves: the file must
+        # record that the fleet was measured at this commit and now. The
+        # caller writes it and says the floors did not change.
+        return doc, changes, notes
     return doc, changes, notes
 
 

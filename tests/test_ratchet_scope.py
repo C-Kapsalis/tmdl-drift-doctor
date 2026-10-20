@@ -24,7 +24,6 @@ from port_helpers_b4_ratchet import (
     make_fleet,
     measure_floors,
     read_floors,
-    floors_path,
     scoped_scope,
     tighten,
     write_floors,
@@ -317,15 +316,28 @@ def test_spec_tighten_counts_regardless_of_allowlist(tmp_path):
                                                   "by_category": {"column": 2}}
 
 
-def test_spec_tighten_noop_leaves_bytes_unchanged(shops, tmp_path):
-    """H-ratchet-tighten-scoped case 12."""
+def test_spec_tighten_noop_leaves_the_floors_alone(shops, tmp_path):
+    """H-ratchet-tighten-scoped case 12, read against the provenance rule.
+
+    A no-op tighten lowers no floor, so the floors themselves are unchanged.
+    The measurement, though, happened: the file records that the fleet was
+    measured now, at this template tree, so a CI job that asks "when was
+    this floor last measured against the live template?" gets a true
+    answer.
+    """
     d = write_report(tmp_path / "d.json", {
         "north": [item(CAT, "Sales[M1]")], "south": [], "east": [], "west": []})
     write_floors(shops, {"north": {"total": 1, "by_category": {"measure": 1}},
                          "south": {"total": 0, "by_category": {}},
                          "east": {"total": 0, "by_category": {}},
                          "west": {"total": 0, "by_category": {}}})
-    before = floors_path(shops).read_bytes()
     r = tighten(shops, d)
     assert r.exit_code == 0, r.output
-    assert floors_path(shops).read_bytes() == before
+    doc = read_floors(shops)
+    assert doc["models"]["north"] == {"total": 1,
+                                      "by_category": {"measure": 1}}
+    assert doc["models"]["south"] == {"total": 0, "by_category": {}}
+    assert doc.get("last_tighten"), (
+        "a no-op tighten did not record the measurement")
+    assert doc["last_tighten"]["scope"] == "fleet"
+    assert doc["last_tighten"]["models"] == ["east", "north", "south", "west"]

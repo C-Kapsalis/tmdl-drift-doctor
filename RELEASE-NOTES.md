@@ -346,6 +346,15 @@
 
 ### Fixed
 
+- **A no-op fleet tighten now records the measurement.** A tighten that
+  lowers no floor still measures the fleet, so the floors file now records
+  that: the update timestamp and the template tree at the top of the file
+  are refreshed and the last-tighten block is rewritten with the report's
+  scope, the models it covered, the report's template tree and the time.
+  Before, a CI job asking "when was this floor last measured against the
+  live template?" read a stale answer. A scoped tighten still leaves those
+  two top-level values exactly as they were, and the floors themselves are
+  unchanged either way.
 - **A ledger line that is not an event object is refused.** The freshness
   command reads two ledgers, and the ledger command reads one. A line that
   holds valid JSON but is not an object — an array, a string, a number —

@@ -712,7 +712,11 @@ def ratchet_tighten(fleet_path, from_json, allow_stale, total_only, allow_new,
         click.echo("floors unchanged.")
         return
     save_floors(fleet.floors_path, doc)
-    click.echo(f"floors written: {fleet.floors_path}")
+    if changes:
+        click.echo(f"floors written: {fleet.floors_path}")
+    else:
+        click.echo(f"floors unchanged; the measurement was recorded: "
+                   f"{fleet.floors_path}")
 
 
 # ───────────────────────────── audit / review ─────────────────────────────
