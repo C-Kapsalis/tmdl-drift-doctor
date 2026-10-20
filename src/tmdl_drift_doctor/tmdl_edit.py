@@ -35,6 +35,40 @@ from typing import Optional, Tuple
 
 from . import TmdlEditError
 
+# ───────────────────── line endings and byte-order marks ─────────────────────
+# A fleet is committed from Windows, and a file that comes back with Unix line
+# endings shows up as a whole-file diff: the reviewer cannot see the change
+# that was asked for. Every writer therefore reads the file's own line endings
+# and writes them back, and every reader ignores a UTF-8 byte-order mark.
+
+
+def read_text(path) -> str:
+    """A file's text, with its line endings untouched and a byte-order mark
+    ignored. (Python's ``read_text`` normalises CRLF to LF and would hide a
+    Windows file from a byte-exact comparison.)"""
+    raw = Path(path).read_bytes()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    return raw.decode("utf-8", errors="replace")
+
+
+def line_ending(text: str) -> str:
+    """The line ending a text uses: CRLF when it has any, else LF."""
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def with_line_ending(text: str, eol: str) -> str:
+    """`text` with every line ending replaced by `eol` (a text read with
+    ``read_text`` has no CRLF left, so this is the way back)."""
+    return text.replace("\r\n", "\n").replace("\n", eol)
+
+
+def write_text(path, text: str, eol: str = "\n") -> None:
+    """Write `text` with the given line ending, atomically enough for a
+    fixer: the file's bytes are the text's bytes, nothing else."""
+    Path(path).write_bytes(with_line_ending(text, eol).encode("utf-8"))
+
+
 # A line that begins a new one-tab object inside a table file (or the
 # table-level annotation tail). `///` description lines belong to the NEXT
 # object and open its block. Table-level blocks such as refreshPolicy end the
@@ -107,7 +141,12 @@ def extract_block(content: str, keyword: str, name: str) -> Optional[str]:
 
 def remove_block(content: str, keyword: str, name: str) -> Optional[str]:
     """Content with the object's block removed (one blank separator collapsed).
-    None if the object is absent."""
+    None if the object is absent.
+
+    The file's trailing newline is preserved exactly as it was: a file that
+    ended with a newline still ends with one, a file that did not still does
+    not. Removing the last object of a file must not change that.
+    """
     span = block_span(content, keyword, name)
     if span is None:
         return None
@@ -116,7 +155,12 @@ def remove_block(content: str, keyword: str, name: str) -> Optional[str]:
     if end < len(lines) and lines[end].strip() == "":
         end += 1
     del lines[start:end]
-    return "\n".join(lines)
+    out = "\n".join(lines)
+    if content.endswith("\n") and not out.endswith("\n"):
+        out += "\n"
+    elif not content.endswith("\n") and out.endswith("\n"):
+        out = out[:-1]
+    return out
 
 
 def replace_block(content: str, keyword: str, name: str, new_block: str) -> Optional[str]:

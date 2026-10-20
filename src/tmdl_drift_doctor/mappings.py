@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import mapping_codec as mc
+from . import tmdl_edit as te
 from .mapping_codec import CodecError
 
 
@@ -49,7 +50,7 @@ def snapshot_encoded(model, mapping_tables) -> dict:
         t = model.tables.get(name)
         if t is None:
             continue
-        text = t.file.read_text(encoding="utf-8")
+        text = te.read_text(t.file)
         if mc.is_encoded(text):
             out[name] = mc.extract_rows(text)
     return out
@@ -79,7 +80,7 @@ def live_rows(definition: Path, table: str) -> Optional[list]:
     path = Path(definition) / "tables" / f"{table}.tmdl"
     if not path.is_file():
         return None
-    text = path.read_text(encoding="utf-8")
+    text = te.read_text(path)
     if not mc.is_encoded(text):
         return None
     return mc.extract_rows(text)
@@ -112,7 +113,7 @@ def merge_findings(name: str, fleet, baseline: dict, definition) -> list:
         if not path.is_file():
             continue                    # table.missing owns it
         try:
-            d_rows = mc.extract_rows(path.read_text(encoding="utf-8"))
+            d_rows = mc.extract_rows(te.read_text(path))
         except CodecError as e:
             out.append(_finding(
                 "mapping_category.missing", name, table,
@@ -238,12 +239,12 @@ def verified_change(path: Path, rows: list):
     """A FileChange replacing the encoded string of `path` with `rows`,
     verified before the write and read back after it."""
     from .remediate import FileChange
-    old = path.read_text(encoding="utf-8")
+    old = te.read_text(path)
     new = mc.replace_rows(old, rows)
     mc.verify_rows(new, rows)
 
     def readback(p, rows=rows):
-        mc.verify_rows(Path(p).read_text(encoding="utf-8"), rows)
+        mc.verify_rows(te.read_text(p), rows)
 
     change = FileChange(path, old, new)
     change.verify = readback
@@ -262,7 +263,7 @@ def apply_category_missing(fleet, f) -> tuple:
     if f.data.get("error"):
         raise CodecError(f.data["error"])
     path = _table_path(fleet, f)
-    rows = mc.extract_rows(path.read_text(encoding="utf-8"))
+    rows = mc.extract_rows(te.read_text(path))
     from .baseline import load_baseline
     t_rows = (load_baseline(fleet).get("encoded_mapping") or {}).get(
         f.data["table"]) or []
@@ -280,7 +281,7 @@ def apply_category_missing(fleet, f) -> tuple:
 
 def apply_row_missing(fleet, f) -> tuple:
     path = _table_path(fleet, f)
-    rows = mc.extract_rows(path.read_text(encoding="utf-8"))
+    rows = mc.extract_rows(te.read_text(path))
     row = f.data["row"]
     if mc.identity(row) in {mc.identity(r) for r in rows}:
         return ("row already present", [])
@@ -291,7 +292,7 @@ def apply_row_missing(fleet, f) -> tuple:
 
 def apply_retire_rows(fleet, f) -> tuple:
     path = _table_path(fleet, f)
-    rows = mc.extract_rows(path.read_text(encoding="utf-8"))
+    rows = mc.extract_rows(te.read_text(path))
     kept, removed, left = mc.remove_category_rows(rows, f.data["category"],
                                                   f.data["keys"])
     if not removed:

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import DriftDoctorError
+from . import tmdl_edit as te
 
 SCALARS = ("rollingWindowGranularity", "rollingWindowPeriods",
            "incrementalGranularity", "incrementalPeriods",
@@ -211,11 +212,11 @@ def refresh_findings(name: str, fleet, model, cache: dict) -> list:
     for tname, table in sorted(model.tables.items()):
         if not _is_fact(fleet, table, roles):
             continue
-        text = table.file.read_text(encoding="utf-8")
+        text = te.read_text(table.file)
         mine = parse_policy(text)
         t_file = tdef / "tables" / table.file.name
         if t_file not in cache:
-            cache[t_file] = parse_policy(t_file.read_text(encoding="utf-8")) \
+            cache[t_file] = parse_policy(te.read_text(t_file)) \
                 if t_file.is_file() else None
         theirs = cache[t_file]
         if mine is not None:
@@ -288,7 +289,7 @@ def apply_missing(fleet, f) -> tuple:
         raise _Skip(f"'{f.data['table']}' cannot take a refresh policy: "
                     f"{f.data['ineligible']}")
     path = _table_path(fleet, f)
-    old = path.read_text(encoding="utf-8")
+    old = te.read_text(path)
     if parse_policy(old) is not None:
         return ("refresh policy already present", [])
     part = partitions(old)[0]
@@ -310,7 +311,7 @@ def apply_missing(fleet, f) -> tuple:
 def apply_window(fleet, f) -> tuple:
     from .remediate import FileChange
     path = _table_path(fleet, f)
-    old = path.read_text(encoding="utf-8")
+    old = te.read_text(path)
     pol = parse_policy(old)
     if pol is None:
         raise DriftDoctorError(f"'{f.data['table']}' has no refresh policy "
@@ -334,7 +335,7 @@ def apply_window(fleet, f) -> tuple:
 def apply_realign(fleet, f) -> tuple:
     from .remediate import FileChange
     path = _table_path(fleet, f)
-    old = path.read_text(encoding="utf-8")
+    old = te.read_text(path)
     pol = parse_policy(old)
     parts = partitions(old)
     if pol is None or len(parts) != 1:

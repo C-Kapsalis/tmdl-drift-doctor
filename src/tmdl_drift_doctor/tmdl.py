@@ -69,6 +69,26 @@ RELATIONSHIP_DEFAULTS = {
 # (its first non-space child is another brace, not a quote).
 MAPPING_ROW_RE = re.compile(r"\{\s*\"((?:[^\"\\]|\\.)*)\"[^{}]*\}")
 
+_BOM = b"\xef\xbb\xbf"
+
+
+def read_model_text(path) -> str:
+    """A model file's text, with a UTF-8 byte-order mark ignored.
+
+    A file saved from Windows may start with a byte-order mark. It is
+    metadata, not content: the file must parse like any other, and the tool
+    must never report it as an unparseable model.
+    """
+    raw = Path(path).read_bytes()
+    if raw.startswith(_BOM):
+        raw = raw[len(_BOM):]
+    return raw.decode("utf-8", errors="replace")
+
+
+def strip_bom(text: str) -> str:
+    """`text` without a leading byte-order mark."""
+    return text[1:] if text.startswith("﻿") else text
+
 
 def unquote(name: str) -> str:
     """Strip TMDL identifier quoting: 'My Name' -> My Name (with '' -> ')."""
@@ -284,7 +304,7 @@ def _read_expression(lines: list[str], decl_index: int, inline: str) -> tuple[st
 
 def parse_table_file(path: Path) -> Table:
     """Parse one ``tables/*.tmdl`` file into a Table."""
-    text = path.read_text(encoding="utf-8")
+    text = read_model_text(path)
     lines = text.split("\n")
     table_name = None
     for line in lines:
@@ -413,7 +433,7 @@ def parse_expression_forms(path: Path) -> dict:
     path = Path(path)
     if not path.exists():
         return {}
-    content = path.read_text(encoding="utf-8")
+    content = read_model_text(path)
     lines = content.split("\n")
     out: dict = {}
     for name, start, end in expression_spans(content):
@@ -447,7 +467,7 @@ def parse_model(definition: Path) -> Model:
         definition / "relationships.tmdl")
     model_file = definition / "model.tmdl"
     if model_file.exists():
-        for line in model_file.read_text(encoding="utf-8").split("\n"):
+        for line in read_model_text(model_file).split("\n"):
             m = _REF_TABLE_RE.match(line)
             if m:
                 model.ref_tables.append(unquote(m.group(1)))
@@ -544,7 +564,7 @@ def parse_relationships_file(path: Path) -> dict:
     path = Path(path)
     if not path.exists():
         return {}
-    return parse_relationships_text(path.read_text(encoding="utf-8"))
+    return parse_relationships_text(read_model_text(path))
 
 
 # ───────────────────── string-aware expression scanning ─────────────────────

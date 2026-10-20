@@ -78,7 +78,7 @@ def cascade_named(fleet, refs, *, add_missing: bool = False,
     targets = resolve_refs(fleet, refs)
     tdef = fleet.template_definition
     for host, name in targets:
-        t_text = (tdef / "tables" / f"{host}.tmdl").read_text(encoding="utf-8")
+        t_text = te.read_text(tdef / "tables" / f"{host}.tmdl")
         block = te.extract_block(t_text, "measure", name)
         for model in fleet.models:
             if model_filter and model != model_filter:
@@ -95,7 +95,7 @@ def cascade_named(fleet, refs, *, add_missing: bool = False,
                 if hosts:
                     table = hosts[0]
                     path = mdef / "tables" / f"{table}.tmdl"
-                    old = path.read_text(encoding="utf-8")
+                    old = te.read_text(path)
                     existing = te.extract_block(old, "measure", name)
                     tag = te.first_lineage_tag(existing or "")
                     intended = te.set_first_lineage_tag(block, tag) if tag \
@@ -118,7 +118,7 @@ def cascade_named(fleet, refs, *, add_missing: bool = False,
                         out.reason = (f"absent, and the host table '{host}' "
                                       f"is missing too")
                         continue
-                    old = path.read_text(encoding="utf-8")
+                    old = te.read_text(path)
                     intended = te.regenerate_lineage_tag(block)
                     new = te.insert_measure_block(old, intended)
                     note, verb = "", "insert"

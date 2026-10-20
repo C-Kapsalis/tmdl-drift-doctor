@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import mapping_codec as mc
+from . import tmdl_edit as te
 from .tmdl import dax_references, normalize_expression, parse_model
 
 PURGE_KINDS = ("purge.fieldparam_entry", "purge.measure", "purge.column",
@@ -54,7 +55,7 @@ def _mapping_rows(definition: Path, table: str) -> Optional[list]:
     path = Path(definition) / "tables" / f"{table}.tmdl"
     if not path.is_file():
         return None
-    text = path.read_text(encoding="utf-8")
+    text = te.read_text(path)
     if not mc.is_encoded(text):
         return None
     try:
@@ -68,7 +69,7 @@ def _mapping_rows(definition: Path, table: str) -> Optional[list]:
 def _encoded_table(fleet) -> Optional[str]:
     for t in fleet.mapping_tables:
         path = fleet.template_definition / "tables" / f"{t}.tmdl"
-        if path.is_file() and mc.is_encoded(path.read_text(encoding="utf-8")):
+        if path.is_file() and mc.is_encoded(te.read_text(path)):
             return t
     return None
 
@@ -444,7 +445,7 @@ def apply_purge(fleet, f) -> tuple:
         keep = [r for r in rows if (r.display, r.ref) not in gone]
         if len(keep) == len(rows):
             return ("rows already removed", [])
-        old = path.read_text(encoding="utf-8")
+        old = te.read_text(path)
         return (f"remove {len(rows) - len(keep)} model-only row(s) from "
                 f"'{f.data['table']}'",
                 [FileChange(path, old, rewrite_rows_text(old, keep, arity,
@@ -455,7 +456,7 @@ def apply_purge(fleet, f) -> tuple:
         path = defn / "tables" / f"{f.data['table']}.tmdl"
         if not path.is_file():
             return ("table file already gone", [])
-        old = path.read_text(encoding="utf-8")
+        old = te.read_text(path)
         new = te.remove_block(old, keyword, obj)
         if new is None:
             if f.kind == "column.purge_listed":
@@ -470,7 +471,7 @@ def apply_purge(fleet, f) -> tuple:
         return apply_retire_rows(fleet, f)
     if f.kind == "purge.relationship":
         path = defn / "relationships.tmdl"
-        old = path.read_text(encoding="utf-8")
+        old = te.read_text(path)
         new = te.remove_relationship_block(old, f.ref)
         if new is None:
             return ("relationship already removed", [])
@@ -480,10 +481,10 @@ def apply_purge(fleet, f) -> tuple:
         path = defn / "tables" / f"{f.ref}.tmdl"
         changes = []
         if path.is_file():
-            changes.append(FileChange(path, path.read_text(encoding="utf-8"),
+            changes.append(FileChange(path, te.read_text(path),
                                       None))
         mf = defn / "model.tmdl"
-        old = mf.read_text(encoding="utf-8")
+        old = te.read_text(mf)
         new = te.deregister_table(old, f.ref)
         if new != old:
             changes.append(FileChange(mf, old, new))

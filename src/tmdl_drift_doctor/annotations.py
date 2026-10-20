@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import mapping_codec as mc
+from . import tmdl_edit as te
 
 PREFIX = "Category_"
 PROPERTY_SUFFIXES = ("_RequiredServices", "_HealthPolicy")
@@ -58,7 +59,7 @@ def mapping_categories(definition: Path, table: str) -> Optional[list]:
     path = Path(definition) / "tables" / f"{table}.tmdl"
     if not path.is_file():
         return None
-    text = path.read_text(encoding="utf-8")
+    text = te.read_text(path)
     blobs = re.findall(r'Binary\.FromText\(\s*"([A-Za-z0-9+/=]*)"', text)
     if not blobs:
         return None
@@ -105,7 +106,7 @@ def findings(name: str, fleet, cache: dict) -> list:
     if mine is None:
         return []
     model_file = definition / "model.tmdl"
-    text = model_file.read_text(encoding="utf-8") if model_file.is_file() \
+    text = te.read_text(model_file) if model_file.is_file() \
         else ""
     suffixes = tuple(_conf(fleet).get("property_suffixes")
                      or PROPERTY_SUFFIXES)
@@ -179,7 +180,7 @@ def apply_undeclared(fleet, f) -> tuple:
         raise _Skip(f"manual: category '{f.ref}' cannot become an annotation "
                     f"key; declare it by hand")
     path = fleet.model_definition(f.model) / "model.tmdl"
-    old = path.read_text(encoding="utf-8")
+    old = te.read_text(path)
     cat = f.data["category"]
     key = PREFIX + cat.replace(" ", "_")
     if re.search(r"^annotation\s+" + re.escape(key) + r"\s*=", old,

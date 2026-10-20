@@ -87,7 +87,7 @@ def mapping_rows(definition, c) -> Optional[list]:
     path = _tables_dir(definition) / f"{c['mapping_table']}.tmdl"
     if not path.is_file():
         return None
-    text = path.read_text(encoding="utf-8")
+    text = te.read_text(path)
     if mc.is_encoded(text):
         return mc.extract_rows(text)
     rows = []
@@ -317,7 +317,7 @@ def _staged(changes: list, path: Path) -> str:
     for c in reversed(changes):
         if Path(c.path) == Path(path) and isinstance(c.new, str):
             return c.new
-    return Path(path).read_text(encoding="utf-8")
+    return te.read_text(path)
 
 
 def _stage(changes: list, path: Path, new) -> None:
@@ -325,7 +325,7 @@ def _stage(changes: list, path: Path, new) -> None:
         if Path(c.path) == Path(path):
             c.new = new
             return
-    old = Path(path).read_text(encoding="utf-8") if Path(path).is_file() \
+    old = te.read_text(path) if Path(path).is_file() \
         else None
     if new != old:
         changes.append(Change(Path(path), old, new))
@@ -1068,7 +1068,7 @@ def mapping_groups(definition, c) -> Optional[list]:
     path = _tables_dir(definition) / f"{c['mapping_table']}.tmdl"
     if not path.is_file():
         return []
-    text = path.read_text(encoding="utf-8")
+    text = te.read_text(path)
     if not mc.is_encoded(text):
         return []
     try:

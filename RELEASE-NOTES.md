@@ -346,6 +346,22 @@
 
 ### Fixed
 
+- **A fixer no longer changes a model's line endings.** A fleet committed
+  from Windows comes back from a fix with Unix line endings, and the diff
+  shows the whole file instead of the change that was asked for. The
+  cascade, the field-parameter retag, the field-parameter row writer,
+  `retire`, `purge`, the rename and the annotation writers now read each
+  file's own line endings and write them back; only the text that actually
+  changed differs. A model file that uses Windows line endings comes out of
+  a remediation run with the same line endings it went in with.
+- **A file keeps its trailing newline.** `purge` dropped the final newline
+  when the object it removed was the last one in the file, so the next diff
+  showed a spurious "\ No newline at end of file". A file that ended with a
+  newline still ends with one; a file that did not still does not.
+- **A byte-order mark is ignored, not reported as a broken model.** A model
+  file saved from Windows may start with a UTF-8 byte-order mark. The
+  parser now skips it and reads the model like any other; before, the tool
+  reported "no `table` declaration found" for a file that is valid TMDL.
 - **`freshness` no longer claims a merge is safe for a retirement kind it
   could not check.** When the head ledger holds a retirement of a kind the
   command does not check (a `mapping_row`, for example), it printed

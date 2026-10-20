@@ -82,13 +82,13 @@ def plan_purge(model_name: str, model_dir: Path, measure: str,
         item.reason = "still referenced by " + ", ".join(sorted(users))
         return item
     path = model.tables[host].file
-    old = path.read_bytes().decode("utf-8")
-    eol = "\r\n" if "\r\n" in old else "\n"
+    old = te.read_text(path)
+    eol = te.line_ending(old)
     new = te.remove_block(old.replace("\r\n", "\n"), "measure", measure)
     te.assert_tmdl_valid(new)
     from .renames import count_report_refs
     item.status = "would-remove"
-    item.path, item.old, item.new = path, old, new.replace("\n", eol)
+    item.path, item.old, item.new = path, old, te.with_line_ending(new, eol)
     item.report_refs = count_report_refs(model_dir, measure)
     item.reason = f"remove from '{host}'"
     if item.report_refs:
@@ -100,14 +100,14 @@ def plan_purge(model_name: str, model_dir: Path, measure: str,
 def dax_reference_count(defn: Path, name: str) -> int:
     n = 0
     for f in sorted((Path(defn) / "tables").glob("*.tmdl")):
-        text = strip_comments(f.read_text(encoding="utf-8"))
+        text = strip_comments(te.read_text(f))
         n += text.count(f"[{name}]")
     return n
 
 
 def _declaring_file(defn: Path, name: str) -> Optional[Path]:
     for f in sorted((Path(defn) / "tables").glob("*.tmdl")):
-        if declares(f.read_text(encoding="utf-8"), name):
+        if declares(te.read_text(f), name):
             return f
     return None
 
@@ -168,7 +168,8 @@ def plan_retire(model_name: str, model_dir: Path, old: str,
 
 
 def _remove_decl(model_name, host: Path, old: str, ok: str) -> RetireResult:
-    text = host.read_text(encoding="utf-8")
+    text = te.read_text(host)
+    eol = te.line_ending(text)
     pat = re.compile(r"^\tmeasure\s+(?:'(?:[^']|'')*'|\"[^\"]*\"|[^=]+?)\s*=",
                      re.MULTILINE)
     actual = None
@@ -183,5 +184,5 @@ def _remove_decl(model_name, host: Path, old: str, ok: str) -> RetireResult:
         return RetireResult(model_name, "ABORTED",
                             f"the declaration of '{old}' could not be removed")
     te.assert_tmdl_valid(new)
-    host.write_bytes(new.encode("utf-8"))
+    te.write_text(host, new, eol)
     return RetireResult(model_name, "retired", ok)

@@ -1649,16 +1649,16 @@ def fieldparam_retag(source, dest, displays, files) -> None:
     from .fieldparams import retag
     planned = []
     for path in files:
-        text = Path(path).read_text(encoding="utf-8")
+        text = te.read_text(path)
         try:
             new, done = retag(text, source, dest, displays)
             te.assert_tmdl_valid(new)
         except (DriftDoctorError, TmdlEditError) as e:
             click.echo(f"{path}: {e}")
             sys.exit(1)
-        planned.append((path, new, done))
-    for path, new, done in planned:
-        Path(path).write_text(new, encoding="utf-8")
+        planned.append((path, new, done, te.line_ending(text)))
+    for path, new, done, eol in planned:
+        te.write_text(path, new, eol)
         click.echo(f"{path}: retagged {', '.join(done)} -> {dest}")
 
 

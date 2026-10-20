@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import DriftDoctorError, TmdlEditError
+from . import tmdl_edit as te
 
 DEFAULT_SIGILS = ("-", "_", "!", "#", "^")
 DEFAULT_EXCLUDE = ("i-",)
@@ -186,7 +187,7 @@ def rewrite_measure_references(path, mapping: dict,
     (measures modified, replacements); writes only when something changed
     and `dry_run` is off."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = te.read_text(path)
     new, measures, total = rewrite_measure_text(text, mapping)
     if new != text and not dry_run:
         path.write_text(new, encoding="utf-8")
@@ -273,7 +274,7 @@ def rewrite_model(definition, measures: Optional[dict] = None,
         res.errors.append(f"{definition}: no tables/ folder")
         return res
     for f in sorted(tables.glob("*.tmdl"), key=lambda p: p.name):
-        text = f.read_text(encoding="utf-8")
+        text = te.read_text(f)
         new, n_meas, n_rep = rewrite_measure_text(text, measures or {})
         new, n_col = rewrite_column_text(new, columns or {})
         if new != text:
@@ -284,7 +285,7 @@ def rewrite_model(definition, measures: Optional[dict] = None,
         res.replacements += n_rep + n_col
     rel = definition / "relationships.tmdl"
     if columns and rel.is_file():
-        text = rel.read_text(encoding="utf-8")
+        text = te.read_text(rel)
         new, n = rewrite_relationship_endpoints(text, columns)
         if new != text:
             res.files_modified.append(str(rel))
@@ -345,7 +346,7 @@ def declared_measures(definition) -> set:
     if not tables.is_dir():
         return out
     for f in tables.glob("*.tmdl"):
-        for ln in f.read_text(encoding="utf-8").split("\n"):
+        for ln in te.read_text(f).split("\n"):
             m = decl.match(ln)
             if m:
                 raw = m.group(1).strip()
@@ -640,7 +641,7 @@ class ModelPlan:
     def current(self, path: Path) -> str:
         if path in self.changes:
             return self.changes[path][1]
-        return path.read_text(encoding="utf-8")
+        return te.read_text(path)
 
 
 def _targets(fleet, model_filters) -> list:
@@ -678,7 +679,7 @@ def plan_measure_rename(fleet, old: str, new: str, *, old_label=None,
             continue
         files = sorted(tables.glob("*.tmdl"), key=lambda p: p.name)
         declaring = [f for f in files
-                     if declares(f.read_text(encoding="utf-8"), old)]
+                     if declares(te.read_text(f), old)]
         if not declaring:
             continue
         plan = ModelPlan(name, model_dir / "definition")

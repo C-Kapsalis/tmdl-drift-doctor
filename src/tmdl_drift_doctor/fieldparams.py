@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import DriftDoctorError, TmdlEditError
+from . import tmdl_edit as te
 
 PAD_VALUE = "Other"
 
@@ -129,7 +130,7 @@ def read_rows(path) -> tuple:
     path = Path(path)
     if not path.is_file():
         return [], 4
-    return parse_rows(path.read_text(encoding="utf-8"))
+    return parse_rows(te.read_text(path))
 
 
 _NAMEOF_ARG = re.compile(r"^NAMEOF\s*\((.*)\)$", re.DOTALL)
@@ -261,18 +262,20 @@ def _line_group(text: str) -> Optional[str]:
 def write_rows(path, rows: list, arity: int, pad: str = PAD_VALUE) -> str:
     """Rewrite the row block of `path` with `rows` at `arity` fields (see
     the module docstring for what survives). Returns the new text; raises
-    when the constructor cannot be found (the file is untouched then)."""
+    when the constructor cannot be found (the file is untouched then). The
+    file keeps its own line endings."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = te.read_text(path)
     new = rewrite_rows_text(text, rows, arity, pad, path)
     if new != text:
-        path.write_text(new, encoding="utf-8")
+        te.write_text(path, new, te.line_ending(text))
     return new
 
 
 def rewrite_rows_text(text: str, rows: list, arity: int,
                       pad: str = PAD_VALUE, path="table") -> str:
-    lines = text.split("\n")
+    eol = te.line_ending(text)
+    lines = text.replace("\r\n", "\n").split("\n")
     b = _locate(lines, path)
     old = lines[b.open_i + 1:b.close_i]
     indent = next((ln[:len(ln) - len(ln.lstrip())] for ln in old
@@ -410,7 +413,7 @@ def rewrite_rows_text(text: str, rows: list, arity: int,
         while tail_start < len(lines) and lines[tail_start].strip() and \
                 set(lines[tail_start].strip()) == {"`"}:
             tail_start += 1
-    return "\n".join(head + body + closing + lines[tail_start:])
+    return eol.join(head + body + closing + lines[tail_start:])
 
 
 # ───────────────────────── which tables ─────────────────────────
@@ -1044,7 +1047,7 @@ def _derived_file(fleet, f, stem) -> Path:
 
 def _change(path: Path, new: str):
     from .remediate import FileChange
-    old = path.read_text(encoding="utf-8")
+    old = te.read_text(path)
     return [FileChange(path, old, new)] if new != old else []
 
 
@@ -1061,7 +1064,7 @@ def apply_blank_row(fleet, f) -> tuple:
     stem = f.data["table"]
     path = _derived_file(fleet, f, stem)
     category, _g = _blank_conf(fleet)
-    new = fix_blank_row(path.read_text(encoding="utf-8"), f.data["row"],
+    new = fix_blank_row(te.read_text(path), f.data["row"],
                         category)
     verb = "add" if f.data.get("state") == "missing" else "restore"
     return (f"{verb} the '{category}' row of '{stem}' from the template",
@@ -1088,7 +1091,7 @@ def apply_row(fleet, f) -> tuple:
     else:
         rows[idx] = fresh
         verb = "replace"
-    new = rewrite_rows_text(path.read_text(encoding="utf-8"), rows, arity,
+    new = rewrite_rows_text(te.read_text(path), rows, arity,
                             path=path)
     return (f"{verb} row '{display}' of '{stem}' from the template",
             _change(path, new))
@@ -1127,7 +1130,7 @@ def apply_cross_level(fleet, f) -> tuple:
             new_rows = rows + [Row(r.display, r.ref, r.order, r.group,
                                    list(r.extras), "", r.bracket)
                                for r in fits]
-            old = path.read_text(encoding="utf-8")
+            old = te.read_text(path)
             new = rewrite_rows_text(old, new_rows, arity, path=path)
             if new != old:
                 changes.append(FileChange(path, old, new))
@@ -1152,7 +1155,7 @@ def apply_dangling(fleet, f) -> tuple:
         keep = [r for r in rows if (r.display, r.ref) not in gone]
         if len(keep) == len(rows):
             continue
-        old = path.read_text(encoding="utf-8")
+        old = te.read_text(path)
         changes.append(FileChange(path, old, rewrite_rows_text(
             old, keep, arity, path=path)))
     return ("remove field-parameter rows whose NAMEOF points at nothing",

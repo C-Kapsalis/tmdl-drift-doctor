@@ -33,7 +33,7 @@ def dangling_arms(definition, measures: set) -> list:
     out = []
     tables = Path(definition) / "tables"
     for f in sorted(tables.glob("*.tmdl")) if tables.is_dir() else []:
-        for i, line in enumerate(f.read_text(encoding="utf-8").split("\n"), 1):
+        for i, line in enumerate(te.read_text(f).split("\n"), 1):
             s = line.strip()
             if s.startswith(("--", "//")):
                 continue
@@ -107,7 +107,7 @@ def apply_dangling(fleet, f) -> tuple:
         if not nums:
             continue
         path = defn / "tables" / fname
-        old = path.read_text(encoding="utf-8")
+        old = te.read_text(path)
         changes.append(FileChange(path, old, remove_lines(old, nums)))
     n = sum(len(v) for v in by_file.values())
     return (f"remove {n} dangling selector branch(es)", changes)

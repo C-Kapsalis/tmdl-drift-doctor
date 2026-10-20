@@ -73,6 +73,29 @@ def _as_text(value) -> str:
     return value or ""
 
 
+def write_change(change) -> None:
+    """Write a change, keeping the file's own line endings.
+
+    A file committed with Windows line endings must come back with Windows
+    line endings: a fixer that converts the whole file makes the diff
+    unreadable and hides the change it was asked for. The new text is
+    written with the line ending the file already had (the old text when the
+    file exists, the new text itself when the file is created)."""
+    path = Path(change.path)
+    new = change.new
+    if isinstance(new, bytes):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(new)
+        return
+    eol = "\n"
+    if path.is_file():
+        raw = path.read_bytes()
+        if b"\r\n" in raw:
+            eol = "\r\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(te.with_line_ending(new, eol).encode("utf-8"))
+
+
 class _Skip(Exception):
     """Raised by an applier that decides, on the live files, that the fix
     must not run; the finding is reported skipped with this reason."""
@@ -973,7 +996,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 out(f, answer[2] if len(answer) > 2 else "skipped", answer[1])
                 continue
             for c in changes:
-                c.path.write_text(c.new, encoding="utf-8")
+                write_change(c)
             state.invalidate(f.model)
             ledger.record_remediation(f.kind, f.model, f.ref, label,
                                       files=[str(c.path) for c in changes])
@@ -1079,12 +1102,8 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                         shutil.rmtree(c.path)
                     elif c.path.exists():
                         c.path.unlink()
-                elif isinstance(c.new, bytes):
-                    c.path.parent.mkdir(parents=True, exist_ok=True)
-                    c.path.write_bytes(c.new)
                 else:
-                    c.path.parent.mkdir(parents=True, exist_ok=True)
-                    c.path.write_text(c.new, encoding="utf-8")
+                    write_change(c)
                 if c.verify is not None:
                     try:
                         c.verify(c.path)
