@@ -218,7 +218,8 @@ def purge_findings(name: str, fleet, baseline: dict, model, ledger) -> list:
     t_measures = _measure_index(template)
     d_measures = _measure_index(model)
     out, purged_rows = [], []
-    for role, stem, row in _axis_rows(fleet, model.definition):
+    all_rows = _axis_rows(fleet, model.definition)
+    for role, stem, row in all_rows:
         if (row.key, membership_key(row)) in t_set.get(row.group, set()):
             continue
         tgt = row.target() or ("", "")
@@ -267,6 +268,87 @@ def purge_findings(name: str, fleet, baseline: dict, model, ledger) -> list:
     out += _zmap_purges(name, fleet, table, d_keys, t_keys, verdict)
     out += _relationship_purges(name, fleet, model, b_tables, b_rels,
                                 cat_tables, verdict, ledger)
+    out += _table_purges(name, fleet, model, b_tables, b_rels, ledger, out,
+                         purged_rows, all_rows)
+    return out
+
+
+def _table_purges(name, fleet, model, b_tables, b_rels, ledger, findings,
+                  purged_rows, all_rows) -> list:
+    """``purge.table``: a client-only table that only the purge removes.
+
+    A table the template does not have survives only because of the content
+    that reads it. When every measure that reads it goes, and no
+    relationship that survives wires it, the table goes with them: it is
+    left with nothing to serve. A table that still carries a surviving
+    measure, a surviving field-parameter row, or a surviving relationship
+    is kept.
+    """
+    out = []
+    retired = {ref for (k, ref) in ledger.active_retirements(name)
+               if k == "table"}
+    kept_tables = {d.get("object") for d in
+                   (fleet.sections.get(name) or {}).get("tables", ())
+                   if d.get("kind") in ("retain", "absent")}
+    purged_rels = {f.ref for f in findings if f.kind == "purge.relationship"}
+    purged_measures = {f.data.get("measure") for f in findings
+                       if f.kind == "purge.measure"}
+    from .tmdl import dax_references
+    # the tables a surviving measure reads
+    surviving_tables: set = set()
+    for t, table in model.tables.items():
+        for measure in table.measures.values():
+            if measure.name in purged_measures:
+                continue
+            refs = dax_references(measure.expression)
+            for tn, _n in refs["qualified"]:
+                if tn in model.tables:
+                    surviving_tables.add(tn)
+    # the tables a surviving field-parameter row still surfaces
+    purged_keys = {(stem, r.display, r.ref) for _c, _r, stem, r, _t in
+                   purged_rows}
+    for role, stem, row in all_rows:
+        if (stem, row.display, row.ref) in purged_keys:
+            continue
+        tgt = row.target() or ("", "")
+        if tgt[0]:
+            surviving_tables.add(tgt[0])
+    for tname, table in sorted(model.tables.items()):
+        if tname in b_tables or tname in retired or tname in kept_tables:
+            continue
+        if is_protected(fleet, tname):
+            continue
+        # a measure of the table's own that serves something else keeps it
+        # alive; a measure that reads only the table goes with it
+        own_serving = False
+        for m in table.measures.values():
+            if m.name in purged_measures:
+                continue
+            refs = dax_references(m.expression)
+            reads = {t for t, _n in refs["qualified"]} | \
+                (refs["tables"] & set(model.tables))
+            if reads - {tname}:
+                own_serving = True
+                break
+        if own_serving:
+            continue
+        if tname in surviving_tables:
+            # a surviving measure or row still serves it
+            continue
+        # a relationship that survives keeps the table alive
+        own = [sig for sig, rel in model.relationships.items()
+               if sig not in b_rels and sig not in purged_rels
+               and tname in (rel.from_table, rel.to_table)]
+        if own:
+            continue
+        # the table's own model-only relationships go with it
+        going = [sig for sig, rel in model.relationships.items()
+                 if sig not in b_rels and tname in (rel.from_table,
+                                                   rel.to_table)]
+        out.append(_f("purge.table", name, tname,
+                      f"model-only table '{tname}' serves only uncustomised "
+                      f"categories and goes",
+                      relationships=sorted(going)))
     return out
 
 
@@ -489,6 +571,15 @@ def apply_purge(fleet, f) -> tuple:
         new = te.deregister_table(old, f.ref)
         if new != old:
             changes.append(FileChange(mf, old, new))
+        # the table's own relationships go with it
+        rel_path = defn / "relationships.tmdl"
+        if rel_path.is_file():
+            rel_old = te.read_text(rel_path)
+            rel_new = rel_old
+            for sig in f.data.get("relationships") or ():
+                rel_new = te.remove_relationship_block(rel_new, sig) or rel_new
+            if rel_new != rel_old:
+                changes.append(FileChange(rel_path, rel_old, rel_new))
         return (f"remove model-only table '{f.ref}'", changes)
     raise ValueError(f.kind)
 

@@ -346,6 +346,13 @@
 
 ### Fixed
 
+- **A client-only table can be purged.** The tool knew how to remove a
+  client-only table from a derived model and listed the kind among the
+  removable ones, but no detection ever produced the finding, so the kind
+  was unreachable and a table nothing read any more stayed in the model
+  forever. The purge now reports it, and removing it deletes the table
+  file, deregisters the table from `model.tmdl` and from the query order,
+  and sweeps the relationships that wired it.
 - **A no-op fleet tighten now records the measurement.** A tighten that
   lowers no floor still measures the fleet, so the floors file now records
   that: the update timestamp and the template tree at the top of the file
