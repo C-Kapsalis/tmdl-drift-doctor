@@ -346,6 +346,15 @@
 
 ### Fixed
 
+- **A reference to a retired table can be repaired.** When a table is
+  retired from the template and a derived model still reads it, the tool
+  reported the finding `retire.stranded_ref` but had no repair for it: the
+  kind was permanent, and a model that reads a table that no longer exists
+  kept reading it. A reference that lives inside a dead sensor operand —
+  `ISFILTERED('Old Campaigns')` and friends — is now stripped, and the rest
+  of the chain keeps working. A measure that reads the retired table for
+  its rows is left alone: removing the reference would change what the
+  measure means, so the tool says a person must decide.
 - **A client-only table can be purged.** The tool knew how to remove a
   client-only table from a derived model and listed the kind among the
   removable ones, but no detection ever produced the finding, so the kind

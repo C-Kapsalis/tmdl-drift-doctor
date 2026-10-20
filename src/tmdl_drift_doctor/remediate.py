@@ -310,6 +310,98 @@ def _apply_retire_column(fleet: Fleet, f: Finding) -> tuple:
     return (label, changes)
 
 
+def _apply_stranded_ref(fleet: Fleet, f: Finding) -> tuple:
+    """``retire.stranded_ref``: repair a live DAX reference to a table the
+    ledger retired.
+
+    A reference that lives inside a dead sensor operand is removed: the
+    model read the table through a sensor, not for its rows, and the rest
+    of the chain keeps working. A reference that reads the table for its
+    rows needs a person, and the tool says so instead of guessing.
+    """
+    from .sensors import data_references, strip_dax_sensors
+    derived, _ = _model_paths(fleet, f)
+    table = f.data.get("retired_table")
+    host = f.data.get("table")
+    obj = f.data.get("object")
+    if not table or not host or not obj:
+        raise DriftDoctorError(
+            f"the finding for {f.ref} does not name the retired table; "
+            f"re-run `drift-doctor detect`")
+    path = _table_file(derived, host)
+    old = te.read_text(path)
+    keyword = f.data.get("object_kind") or "measure"
+    block = te.extract_block(old, keyword, obj)
+    if block is None:
+        raise DriftDoctorError(
+            f"{keyword} {f.ref} is no longer present in {path} — the model "
+            f"changed after detection. Re-run `drift-doctor detect`.")
+    dax = _measure_dax(block)
+    if dax is None:
+        raise DriftDoctorError(
+            f"the body of {keyword} {f.ref} could not be read; nothing was "
+            f"written")
+    if data_references(dax, table):
+        raise DriftDoctorError(
+            f"{keyword} {f.ref} reads the retired table '{table}' for its "
+            f"rows, not through a sensor. Removing the reference would "
+            f"change what the measure means, so a person must decide: "
+            f"repoint it at a live table, or drop the measure.")
+    new_dax, removed = strip_dax_sensors(dax, table)
+    if not removed:
+        raise DriftDoctorError(
+            f"the dead sensor over the retired table '{table}' is no longer "
+            f"in {keyword} {f.ref}; re-run `drift-doctor detect`")
+    ok, new = te.replace_measure_expression(old, obj, new_dax) \
+        if keyword == "measure" else (False, old)
+    if not ok:
+        raise DriftDoctorError(
+            f"the body of {keyword} {f.ref} could not be rewritten; nothing "
+            f"was written")
+    return (f"strip {removed} dead sensor operand(s) over the retired table "
+            f"'{table}' from {f.ref}",
+            [FileChange(path, old, new)])
+
+
+def _measure_dax(block: str) -> Optional[str]:
+    """The DAX body of a measure or calculated-column block.
+
+    The body runs from the text after the declaration's ``=`` to the
+    object's own property lines (two tabs) — a property line ends the body.
+    """
+    lines = block.split("\n")
+    for i, line in enumerate(lines):
+        if "=" not in line:
+            continue
+        head, _sep, tail = line.partition("=")
+        if not head.strip().startswith(("measure", "column")):
+            continue
+        body = [tail]
+        for ln in lines[i + 1:]:
+            if ln.startswith("\t\t") and ln.strip() and not ln.startswith("\t\t\t"):
+                break
+            body.append(ln)
+        while body and not body[-1].strip():
+            body.pop()
+        return _dedent_dax("\n".join(body))
+
+
+def _dedent_dax(text: str) -> str:
+    """A DAX body with its own indentation removed.
+
+    A body in a table file sits at three tabs; the rewriter puts it back
+    where it belongs, so it must not carry the indentation with it.
+    """
+    lines = [ln for ln in text.split("\n")]
+    indents = [len(ln) - len(ln.lstrip()) for ln in lines
+               if ln.strip()]
+    if not indents:
+        return text.strip()
+    cut = min(indents)
+    return "\n".join(ln[cut:] if ln.strip() else "" for ln in lines)
+    return None
+
+
 def _sweep_relationships(derived: Path, f: Finding) -> list:
     """Remove the relationships detection marked as going WITH a retired
     table/column (template-owned or ledger-retired ones only)."""
@@ -649,6 +741,7 @@ APPLIERS: dict = {
     "retire.column": _apply_retire_column,
     "retire.measure": _apply_retire_measure,
     "retire.mapping_row": _apply_retire_mapping_row,
+    "retire.stranded_ref": _apply_stranded_ref,
 }
 
 
