@@ -58,6 +58,7 @@ class FileChange:
     old: Optional[str]
     new: Optional[str]
     verify: Optional[Callable] = None    # read-back check after the write
+    eol: Optional[str] = None            # line ending of a CREATED file
 
     def diff(self) -> str:
         a = _as_text(self.old).splitlines(keepends=True)
@@ -79,8 +80,9 @@ def write_change(change) -> None:
     A file committed with Windows line endings must come back with Windows
     line endings: a fixer that converts the whole file makes the diff
     unreadable and hides the change it was asked for. The new text is
-    written with the line ending the file already had (the old text when the
-    file exists, the new text itself when the file is created)."""
+    written with the line ending the file already had; a created file takes
+    the change's own `eol` (the line ending of the file it was copied from)
+    when it has one, else LF."""
     path = Path(change.path)
     new = change.new
     if isinstance(new, bytes):
@@ -92,6 +94,8 @@ def write_change(change) -> None:
         raw = path.read_bytes()
         if b"\r\n" in raw:
             eol = "\r\n"
+    elif change.eol:
+        eol = change.eol
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(te.with_line_ending(new, eol).encode("utf-8"))
 
@@ -160,6 +164,20 @@ def _table_file(definition: Path, table: str) -> Path:
 _split_ref = split_ref
 
 
+def _eol_of(*paths) -> str:
+    """The line ending of the first of `paths` that has a line break: the
+    file a new file is copied from first, then a file of the model it lands
+    in. LF when none has one."""
+    for path in paths:
+        try:
+            raw = Path(path).read_bytes()
+        except OSError:
+            continue
+        if b"\n" in raw:
+            return "\r\n" if b"\r\n" in raw else "\n"
+    return "\n"
+
+
 def _apply_table_missing(fleet: Fleet, f: Finding) -> tuple:
     derived, template = _model_paths(fleet, f)
     src = _table_file(template, f.ref)
@@ -172,7 +190,8 @@ def _apply_table_missing(fleet: Fleet, f: Finding) -> tuple:
     model_new = te.register_table(model_old, f.ref)
     if te.is_m_table(content):
         model_new = te.register_query_order(model_new, f.ref)
-    changes = [FileChange(dst, None, content)]
+    changes = [FileChange(dst, None, content,
+                          eol=_eol_of(src, model_file))]
     if model_new != model_old:
         changes.append(FileChange(model_file, model_old, model_new))
     return ("copy table from template + register in model.tmdl "

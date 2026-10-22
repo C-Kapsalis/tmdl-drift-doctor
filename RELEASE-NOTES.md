@@ -28,6 +28,12 @@
   drift with only a scope warning. It is now refused like any unreadable
   report: exit 2 and a message naming the file. A report with an empty
   `models` block is still a report. `tests/test_blast_not_a_report.py`.
+- BUGFIX: a file the cascade creates follows the line endings of the file
+  it is copied from. A `table.missing` copy was always written with LF,
+  even from a CRLF template into a CRLF model, although these notes promise
+  that line endings survive a fix. The copy now takes the template file's
+  line endings (the model's `model.tmdl` decides when the template file
+  has no line break). `tests/test_created_file_line_endings.py`.
 
 ## 1.2.1 (2026-10-22)
 
