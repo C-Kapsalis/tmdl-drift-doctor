@@ -63,10 +63,27 @@ def with_line_ending(text: str, eol: str) -> str:
     return text.replace("\r\n", "\n").replace("\n", eol)
 
 
-def write_text(path, text: str, eol: str = "\n") -> None:
+def has_bom(path) -> bool:
+    """Does the file at `path` start with a UTF-8 byte-order mark? (False
+    when it does not exist.)"""
+    try:
+        with open(path, "rb") as f:
+            return f.read(3) == b"\xef\xbb\xbf"
+    except OSError:
+        return False
+
+
+def write_text(path, text: str, eol: str = "\n",
+               bom: Optional[bool] = None) -> None:
     """Write `text` with the given line ending, atomically enough for a
-    fixer: the file's bytes are the text's bytes, nothing else."""
-    Path(path).write_bytes(with_line_ending(text, eol).encode("utf-8"))
+    fixer: the file's bytes are the text's bytes, nothing else. The file
+    keeps the byte-order mark it had (`bom=None`), whether or not the text
+    was read with it."""
+    if text.startswith("\ufeff"):
+        text, bom = text[1:], True
+    elif bom is None:
+        bom = has_bom(path)
+    Path(path).write_bytes(encode(text, eol, bom))
 
 
 def encode(text: str, eol: str, bom: bool = False) -> bytes:

@@ -34,6 +34,14 @@
   that line endings survive a fix. The copy now takes the template file's
   line endings (the model's `model.tmdl` decides when the template file
   has no line break). `tests/test_created_file_line_endings.py`.
+- BUGFIX: a model file's UTF-8 byte-order mark survives every write. The
+  ordinary cascade kept it, but `remediate --ref` dropped it, and so did
+  every fixer that reads a file without its mark and writes it back
+  (`retire --drop`, the encoded mapping rows, the field-parameter row
+  writer). The restore after a failed read-back (the
+  encoded mapping rows are read back after each write) dropped it too: it
+  now puts back the exact bytes the file held before the write, mark and
+  line endings included. `tests/test_bom_preserved.py`.
 
 ## 1.2.1 (2026-10-22)
 

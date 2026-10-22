@@ -89,15 +89,18 @@ def write_change(change) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(new)
         return
-    eol = "\n"
+    eol, bom = "\n", False
     if path.is_file():
         raw = path.read_bytes()
         if b"\r\n" in raw:
             eol = "\r\n"
+        # A fixer may have read the file without its byte-order mark; the
+        # file keeps the mark it had either way.
+        bom = raw.startswith(b"\xef\xbb\xbf") and not new.startswith("\ufeff")
     elif change.eol:
         eol = change.eol
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(te.with_line_ending(new, eol).encode("utf-8"))
+    path.write_bytes(te.encode(new, eol, bom))
 
 
 class _Skip(Exception):
@@ -1249,6 +1252,8 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 if backups is not None:
                     backups.save(c.path)
                 overlay.allow(c.path)
+                original = c.path.read_bytes() if c.verify is not None \
+                    and c.path.is_file() else None
                 if c.new is None:
                     if c.path.is_dir():
                         import shutil
@@ -1261,7 +1266,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                     try:
                         c.verify(c.path)
                     except DriftDoctorError:
-                        _restore(c)
+                        _restore(c, original)
                         raise
             state.invalidate(f.model)
             state.record(f)
@@ -1311,9 +1316,13 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
     return result
 
 
-def _restore(c: FileChange) -> None:
-    """Put a file back as it was before a write whose read-back failed."""
-    if c.old is None:
+def _restore(c: FileChange, original: Optional[bytes] = None) -> None:
+    """Put a file back as it was before a write whose read-back failed:
+    the exact bytes it held (`original`, taken before the write), so its
+    byte-order mark and line endings come back too."""
+    if original is not None:
+        Path(c.path).write_bytes(original)
+    elif c.old is None:
         Path(c.path).unlink(missing_ok=True)
     elif isinstance(c.old, bytes):
         Path(c.path).write_bytes(c.old)
