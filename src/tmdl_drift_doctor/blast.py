@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import StaleBaselineError
+from .detect import JSON_SCHEMA_VERSION
 from .report_io import read_report_text
 
 MARKER = "<!-- drift-doctor:blast-radius -->"
@@ -50,6 +51,18 @@ def _readable(path, doc) -> dict:
     must refuse it as a configuration problem, never crash on it.
     """
     p = Path(path)
+    version = doc.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool) \
+            or version < JSON_SCHEMA_VERSION:
+        raise DiffError(f"the report at {p} is not a `drift-doctor detect "
+                        f"--json` report this version can compare "
+                        f"(schema_version is {version!r}, it needs "
+                        f"{JSON_SCHEMA_VERSION}); re-run `drift-doctor "
+                        f"detect --json` to write one")
+    if "models" not in doc:
+        raise DiffError(f"the report at {p} has no models block, so it is not "
+                        f"a `drift-doctor detect --json` report; re-run "
+                        f"`drift-doctor detect --json` to write one")
     models = doc.get("models")
     if models is not None and not isinstance(models, dict):
         raise DiffError(f"the report at {p} has a models block that is a "

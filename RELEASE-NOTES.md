@@ -22,6 +22,12 @@
   nothing is unseen. The body that lists retirements the branch has not
   seen now names the base too ("This branch base (`<label>`) predates …");
   without a label it reads as before. `tests/test_freshness_body.py`.
+- BUGFIX: `diff` accepted a file that is not a detection report (a JSON
+  object without a `models` block, or a `schema_version: 1` report) with
+  exit 0, and called every finding on the other side new or resolved
+  drift with only a scope warning. It is now refused like any unreadable
+  report: exit 2 and a message naming the file. A report with an empty
+  `models` block is still a report. `tests/test_blast_not_a_report.py`.
 
 ## 1.2.1 (2026-10-22)
 
