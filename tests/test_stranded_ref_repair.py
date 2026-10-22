@@ -119,9 +119,9 @@ def test_a_data_reference_is_not_repaired_without_a_person(stand_in, tmp_path):
     model = _model_file(root, data)
     before = model.read_bytes()
     # the measure reads the retired table for its rows
-    model.write_text(model.read_text(encoding="utf-8").replace(
-        "int(not ISEMPTY('Old Campaigns'))",
-        "SUM('Old Campaigns'[clicks])"), encoding="utf-8")
+    model.write_bytes(model.read_bytes().replace(
+        b"int(not ISEMPTY('Old Campaigns'))",
+        b"SUM('Old Campaigns'[clicks])"))
 
     result = _repair(fy)
     assert result.count("applied") == 0, result.outcomes

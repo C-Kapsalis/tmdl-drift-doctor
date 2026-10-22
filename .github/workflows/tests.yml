@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      # The report-side sync tests need pbi-plot-styler, and the filter
+      # coverage tests skip without pbip-model-forge.
+      - name: Install companion tools
+        run: |
+          python -m pip install "pbi-plot-styler @ git+https://github.com/C-Kapsalis/pbi-plot-styler@v1.2.0"
+          python -m pip install "pbip-model-forge @ git+https://github.com/C-Kapsalis/pbip-model-forge@v1.2.0"
+      - name: Test
+        run: python -m pytest -rfEs

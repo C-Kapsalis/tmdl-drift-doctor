@@ -891,8 +891,10 @@ _FLOAT_TAG = "\u0000F"
 
 def _load_exact(raw: str):
     """(document, dump function) when the JSON re-serializes to exactly
-    its bytes (2-space indent, float literals kept), else (None, None)."""
+    its bytes (2-space indent, float literals kept, the file's own line
+    endings), else (None, None)."""
     floats: list = []
+    eol = "\r\n" if "\r\n" in raw else "\n"
 
     def keep_float(s):
         floats.append(s)
@@ -907,7 +909,7 @@ def _load_exact(raw: str):
         text = json.dumps(d, indent=2, ensure_ascii=False)
         text = re.sub(r'"\\u0000F(\d+)\\u0000"',
                       lambda m: floats[int(m.group(1))], text)
-        return text + ("\n" if raw.endswith("\n") else "")
+        return text.replace("\n", eol) + (eol if raw.endswith("\n") else "")
 
     return (doc, dump) if dump(doc) == raw else (None, None)
 

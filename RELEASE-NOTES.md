@@ -1,5 +1,27 @@
 # Release notes
 
+## Fixes after v1.2.0 (unreleased)
+
+### Fixed
+
+- BUGFIX (kept): a model with Windows (CRLF) line endings is handled like
+  the same model with LF endings. Found by running the suite on Windows
+  in CI; `tests/test_crlf_models.py` proves each case.
+  - A CRLF table's refresh policy was reported as `refresh_policy.invalid`
+    ("the refreshPolicy block is not at table level"), so a fixed policy
+    never cleared.
+  - `groups drop` and `groups drop-table` left a CRLF `model.tmdl` with a
+    blank line where the `ref table` line was and the table still in
+    `PBI_QueryOrder`, and
+    skipped a CRLF report JSON file as "not reproducible as JSON". The
+    JSON file now keeps its CRLF endings when it is rewritten.
+  - `remediate --ref` failed on a CRLF table ("does not read back as the
+    block that was written"). On Windows it also rewrote every file with
+    CRLF, so a second run applied the same change again. It now writes
+    each file with its own line endings.
+  - After a failed read-back, the restored file on Windows got `\r\r\n`
+    line endings. It now gets back its exact text.
+
 ## Unreleased
 
 ### Added
