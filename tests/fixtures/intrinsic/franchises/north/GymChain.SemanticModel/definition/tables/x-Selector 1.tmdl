@@ -1,0 +1,17 @@
+table 'x-Selector 1'
+	lineageTag: 10000000-0000-4000-8000-000000000030
+
+	column 'x-Selector 1'
+		dataType: string
+		lineageTag: 10000000-0000-4000-8000-000000000031
+		summarizeBy: none
+		sourceColumn: [Value1]
+
+	partition 'x-Selector Main Plot' = calculated
+		mode: import
+		source = ```
+				{
+				("Visits", NAMEOF ( [i-Visit Amount] ), 0, "Visits_x" ),
+				("Sessions", NAMEOF ( [i-Session Total] ), 1, "Sessions_x" )
+				}
+				```

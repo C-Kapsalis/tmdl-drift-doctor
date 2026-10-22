@@ -1,0 +1,23 @@
+table Visits
+	lineageTag: 10000000-0000-4000-8000-000000000001
+
+	column amount
+		dataType: int64
+		lineageTag: 10000000-0000-4000-8000-000000000002
+		summarizeBy: sum
+		sourceColumn: [amount]
+
+	column MemberId
+		dataType: int64
+		lineageTag: 10000000-0000-4000-8000-000000000003
+		summarizeBy: none
+		sourceColumn: [MemberId]
+
+	partition Visits = m
+		mode: import
+		queryGroup: Visits
+		source =
+				let
+				    Source = Csv.Document(File.Contents("visits.csv"), [Delimiter=","])
+				in
+				    Source

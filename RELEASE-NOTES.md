@@ -4,6 +4,61 @@
 
 ### Added
 
+- **The visibility hygiene rules.** A measure whose name says it is for
+  report authors must not be hidden, and a measure whose name says it is
+  plumbing must be. The class of a measure is decided by its name alone, the
+  way tmdl-preflight's O009 and O011 rules decide it, so a measure hidden by
+  accident still reads as user-facing. Two findings: `visibility.hidden_user_facing`
+  ("`<table>[<name>]` has a user-facing NAME but is hidden. Either it was
+  hidden by mistake (show it) or it is really a helper (rename with a helper
+  prefix — a cascade rename).") and `visibility.helper_visible` ("`<table>[<name>]`
+  has a helper NAME but is visible and is not on the always-visible allowlist
+  — auto-hiding."). The first repair removes the hidden flag, the second adds
+  it. A scaffolding name that looks user-facing ("Max Date", "Date Filter")
+  is never reported, and the always-visible infrastructure measures
+  (`f-All`, `f-Slicer`, the `i-` set) are never reported either. A fleet may
+  add names to the allowlist (`visibility.always_visible`) and replace the
+  built-in helper test with its own prefixes (`visibility.helper_prefixes`).
+  **STRICTER:** neither repair is batch-safe: the kind has to be in
+  `allowlist.kinds` and the run has to ask.
+- **The applied-filters coverage check.** `i-Applied Filters` lists every
+  dimension filter the model currently applies. A dimension the model offers
+  in a y-Selector table but the measure does not expose is reported as
+  `ifilter.coverage_gap` ("N visible y-Selector dimension(s) are NOT exposed
+  via i-Applied Filters in `<model>`: + `<table>[<column>]` … AUTO-FIX
+  regenerates the 'i-Applied Filters' measure from the full visible
+  y-Selector dimension set"), and the repair regenerates the measure through
+  the generator in pbip-model-forge.
+- **The applied-filters measure is rebuilt after a removal.** A retirement or
+  a purge that removes an object the measure names leaves a stale branch
+  behind — the coverage check never re-fires on one. Two findings ask for the
+  rebuild: `retire.ifilter_regen` and `purge.ifilter_regen` ("'i-Applied
+  Filters' references object(s) this run retires (…)" / "… this run purges
+  (…)"). **STRICTER:** a retired column counts too: the rebuild is asked for
+  when the measure names a column the run removes, not only a table or a
+  measure.
+- **The f-filter coverage check.** Every fact a user-facing measure reads
+  needs a category gate, and every analysis category needs a gate in the
+  all-filters measure. A fact with no gate, and a category with no gate, are
+  reported as `ffilter.coverage_gap` ("f-measure coverage gap in `<model>`
+  (N to create, M to extend, K f-All gate(s) to add, U category(ies) ungated
+  with no resolvable f- measure) — every fact consumed by user-facing measures
+  needs an f-<Category> gate, AND every mapping category must be GATED in
+  f-All"), with the creates, the extends, the gates and the ungated
+  categories listed, and the repair adds them through the generator in
+  pbip-model-forge. A fact no category can be found for is reported as
+  `ffilter.uncategorized` ("N fact table(s) can't be auto-covered by the
+  f-filter generator (no resolvable analysis category): … NO AUTO-FIX:
+  assign the fact an analysis category (or add its f-measure by hand), then
+  re-run."); that one is report-only. **BUGFIX:** a gate line that tests a
+  measure the ledger retired goes with that measure, so the all-filters
+  measure never tests a measure that no longer exists.
+
+  The two generator-backed repairs need
+  [pbip-model-forge](https://github.com/C-Kapsalis/pbip-model-forge)
+  installed next to drift-doctor; without it the checks report nothing (and a
+  run says so on standard error) and the repairs refuse to run. The
+  visibility rules need nothing else.
 - **The ratchet counts by category head.** A floor is a `total` plus a count
   per head (the text before the first dot: `measure.missing` and
   `measure.expression_drift` both roll up to `measure`). What counts is every
@@ -511,25 +566,6 @@
 - **A stray `table` line ends a block**, so a malformed concatenated file
   can no longer make one object swallow the next table. Inserting a measure
   block written at column 0 now indents it to object depth.
-
-### Known gaps
-
-Three checks the private suite had are not run by this tool. Each one needs
-a generator or a per-measure decision that is not part of it, so they are
-recorded here rather than half-implemented.
-
-- **The applied-filters coverage check is not run.** A dimension the model
-  tests but the applied-filters measure does not is not reported, and the
-  measure is not regenerated after a retirement or a purge. The generator
-  that builds the applied-filters measure lives in pbip-model-forge, not
-  here.
-- **The f-filter coverage check is not run.** A fact table read by a
-  visible measure with no matching category gate, and a category with no
-  gate in the all-filters measure, are not reported. The gate planner
-  lives in pbip-model-forge, not here.
-- **The visibility hygiene rules are not run.** A hidden user-facing
-  measure, and a visible helper measure, are not reported. The rule needs
-  a per-measure class decision this tool does not make.
 
 ## v1.1.0 (2026-10-12)
 

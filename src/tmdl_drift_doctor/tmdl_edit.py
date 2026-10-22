@@ -69,6 +69,14 @@ def write_text(path, text: str, eol: str = "\n") -> None:
     Path(path).write_bytes(with_line_ending(text, eol).encode("utf-8"))
 
 
+def encode(text: str, eol: str, bom: bool = False) -> bytes:
+    """The bytes of a file holding `text`: the byte-order mark (when the file
+    had one), the text with `eol` line endings, UTF-8. A file written from
+    Windows keeps both."""
+    body = with_line_ending(text, eol).encode("utf-8")
+    return (b"\xef\xbb\xbf" + body) if bom else body
+
+
 # A line that begins a new one-tab object inside a table file (or the
 # table-level annotation tail). `///` description lines belong to the NEXT
 # object and open its block. Table-level blocks such as refreshPolicy end the

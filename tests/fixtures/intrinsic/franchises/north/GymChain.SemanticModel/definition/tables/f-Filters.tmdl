@@ -1,0 +1,10 @@
+table f-Filters
+	lineageTag: 10000000-0000-4000-8000-000000000050
+
+	measure f-All =
+			VAR temp_basic =
+					TRUE()
+			VAR temp_alt =
+					FALSE()
+			RETURN temp_basic || temp_alt
+		lineageTag: 10000000-0000-4000-8000-000000000051

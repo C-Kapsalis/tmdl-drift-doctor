@@ -270,7 +270,23 @@ def purge_findings(name: str, fleet, baseline: dict, model, ledger) -> list:
                                 cat_tables, verdict, ledger)
     out += _table_purges(name, fleet, model, b_tables, b_rels, ledger, out,
                          purged_rows, all_rows)
+    out += _ifilter_regen(name, model, out)
     return out
+
+
+def _ifilter_regen(name: str, model, findings: list) -> list:
+    """``purge.ifilter_regen``: the applied-filters measure references an
+    object this run purges, so the measure must be rebuilt afterwards."""
+    from .applied_filters import measure_expression, referenced_removed
+    from .applied_filters import regen_finding
+    _host, expression = measure_expression(model)
+    if not expression:
+        return []
+    return regen_finding(
+        "purge.ifilter_regen", name,
+        referenced_removed(expression, findings, "purge.table",
+                           "purge.measure", "purge.column"),
+        "purges", "post-purge")
 
 
 def _table_purges(name, fleet, model, b_tables, b_rels, ledger, findings,

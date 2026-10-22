@@ -38,6 +38,10 @@ from .detect import JSON_SCHEMA_VERSION
 
 HARD_ZERO = "retire"
 INTRINSIC = ("ifilter", "visibility", "ffilter.coverage_gap")
+#: regeneration requests: they ask for a measure to be rebuilt, they do not
+#: report an object that came back, so they are neither drift debt nor a
+#: resurrection.
+REGENERATIONS = ("retire.ifilter_regen", "purge.ifilter_regen")
 FLOORS_VERSION = 2
 TOTALS_FILE = "drift_totals.json"
 
@@ -47,7 +51,8 @@ def head(kind: str) -> str:
 
 
 def _intrinsic(kind: str) -> bool:
-    return any(kind == p or kind.startswith(p + ".") for p in INTRINSIC)
+    return any(kind == p or kind.startswith(p + ".") for p in INTRINSIC) \
+        or kind in REGENERATIONS
 
 
 def _counted(f: dict) -> bool:
@@ -183,7 +188,8 @@ def resurrections(report: dict) -> dict:
     for name, body in (report.get("models") or {}).items():
         hits = [f for f in (body or {}).get("findings") or ()
                 if isinstance(f, dict)
-                and head(f.get("kind") or "") == HARD_ZERO]
+                and head(f.get("kind") or "") == HARD_ZERO
+                and (f.get("kind") or "") not in REGENERATIONS]
         if hits:
             out[name] = hits
     return out

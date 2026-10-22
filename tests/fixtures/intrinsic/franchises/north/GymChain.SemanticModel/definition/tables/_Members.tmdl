@@ -1,0 +1,29 @@
+table _Members
+	lineageTag: 10000000-0000-4000-8000-000000000010
+
+	column MemberId
+		dataType: int64
+		lineageTag: 10000000-0000-4000-8000-000000000011
+		summarizeBy: none
+		sourceColumn: [MemberId]
+
+	column Plan
+		dataType: string
+		lineageTag: 10000000-0000-4000-8000-000000000012
+		summarizeBy: none
+		sourceColumn: [Plan]
+
+	column Region
+		dataType: string
+		lineageTag: 10000000-0000-4000-8000-000000000013
+		summarizeBy: none
+		sourceColumn: [Region]
+
+	partition _Members = m
+		mode: import
+		queryGroup: _Members
+		source =
+				let
+				    Source = Csv.Document(File.Contents("members.csv"), [Delimiter=","])
+				in
+				    Source

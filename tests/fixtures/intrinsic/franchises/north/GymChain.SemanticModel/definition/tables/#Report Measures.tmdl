@@ -1,0 +1,15 @@
+table '#Report Measures'
+	lineageTag: 10000000-0000-4000-8000-000000000060
+
+	measure 'Total Visits' = SUM(Visits[amount])
+		formatString: #,0
+		lineageTag: 10000000-0000-4000-8000-000000000061
+
+	measure 'Total Sessions' = SUM(Sessions[count])
+		formatString: #,0
+		lineageTag: 10000000-0000-4000-8000-000000000062
+
+	measure 'Membership' = COUNTROWS(_Members)
+		isHidden
+		formatString: #,0
+		lineageTag: 10000000-0000-4000-8000-000000000063
