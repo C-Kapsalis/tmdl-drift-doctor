@@ -58,11 +58,12 @@ class FileChange:
     old: Optional[str]
     new: Optional[str]
     verify: Optional[Callable] = None    # read-back check after the write
+    eol: Optional[str] = None            # line ending of a CREATED file
 
     def diff(self) -> str:
         a = _as_text(self.old).splitlines(keepends=True)
         b = _as_text(self.new).splitlines(keepends=True)
-        label = str(self.path)
+        label = te.diff_label(self.path)
         return "".join(difflib.unified_diff(
             a, b, fromfile=f"a/{label}", tofile=f"b/{label}"))
 
@@ -79,21 +80,27 @@ def write_change(change) -> None:
     A file committed with Windows line endings must come back with Windows
     line endings: a fixer that converts the whole file makes the diff
     unreadable and hides the change it was asked for. The new text is
-    written with the line ending the file already had (the old text when the
-    file exists, the new text itself when the file is created)."""
+    written with the line ending the file already had; a created file takes
+    the change's own `eol` (the line ending of the file it was copied from)
+    when it has one, else LF."""
     path = Path(change.path)
     new = change.new
     if isinstance(new, bytes):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(new)
         return
-    eol = "\n"
+    eol, bom = "\n", False
     if path.is_file():
         raw = path.read_bytes()
         if b"\r\n" in raw:
             eol = "\r\n"
+        # A fixer may have read the file without its byte-order mark; the
+        # file keeps the mark it had either way.
+        bom = raw.startswith(b"\xef\xbb\xbf") and not new.startswith("\ufeff")
+    elif change.eol:
+        eol = change.eol
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(te.with_line_ending(new, eol).encode("utf-8"))
+    path.write_bytes(te.encode(new, eol, bom))
 
 
 class _Skip(Exception):
@@ -160,6 +167,20 @@ def _table_file(definition: Path, table: str) -> Path:
 _split_ref = split_ref
 
 
+def _eol_of(*paths) -> str:
+    """The line ending of the first of `paths` that has a line break: the
+    file a new file is copied from first, then a file of the model it lands
+    in. LF when none has one."""
+    for path in paths:
+        try:
+            raw = Path(path).read_bytes()
+        except OSError:
+            continue
+        if b"\n" in raw:
+            return "\r\n" if b"\r\n" in raw else "\n"
+    return "\n"
+
+
 def _apply_table_missing(fleet: Fleet, f: Finding) -> tuple:
     derived, template = _model_paths(fleet, f)
     src = _table_file(template, f.ref)
@@ -172,7 +193,8 @@ def _apply_table_missing(fleet: Fleet, f: Finding) -> tuple:
     model_new = te.register_table(model_old, f.ref)
     if te.is_m_table(content):
         model_new = te.register_query_order(model_new, f.ref)
-    changes = [FileChange(dst, None, content)]
+    changes = [FileChange(dst, None, content,
+                          eol=_eol_of(src, model_file))]
     if model_new != model_old:
         changes.append(FileChange(model_file, model_old, model_new))
     return ("copy table from template + register in model.tmdl "
@@ -1100,7 +1122,36 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
     for model in dict.fromkeys(f.model for f in admitted):
         overlay._scan(model)
     backups = Backups() if backup and not dry_run else None
-    for position, f in enumerate(admitted, 1):
+
+    def asked(f) -> bool:
+        """Can this finding reach a question? The gates below that do not
+        depend on the run so far, in the same order: a `[manual]` item, an
+        advisory, an overridden or a gated-out finding is never asked, so
+        it is not counted in the walk's `[n/total]`."""
+        if f.overridden:
+            return False
+        if f.advisory:
+            return bool(offer_extra_delete and confirm is not None
+                        and not batch_only
+                        and _extra_deletable(fleet, state, f))
+        if applier_for(f.kind) is None or not fleet.allows(f.kind):
+            return False
+        if (f.kind in RETIREMENT_FINDING_KINDS or _sync_only(f.kind)) \
+                and not sync:
+            return False
+        if f.blocked or (is_destructive(f.kind) and not allow_destructive):
+            return False
+        return not (batch_only and not is_batch_safe(f.kind))
+
+    questions = sum(1 for f in admitted if asked(f)) \
+        if confirm is not None else 0
+    counter = [0]
+
+    def position():
+        counter[0] += 1
+        return (counter[0], max(questions, counter[0]))
+
+    for f in admitted:
         if f.overridden:
             o = f.override
             out(f, "overridden",
@@ -1125,7 +1176,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
             refs = _report_refs(fleet, f)
             label += (f" ({refs} report ref(s) will break)"
                       if refs else "")
-            answer = confirm(f, label, changes, (position, len(admitted)))
+            answer = confirm(f, label, changes, position())
             if not answer[0]:
                 out(f, answer[2] if len(answer) > 2 else "skipped", answer[1])
                 continue
@@ -1221,7 +1272,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 out(f, "would-apply", label, changes)
                 continue
             if confirm is not None:
-                answer = confirm(f, label, changes, (position, len(admitted)))
+                answer = confirm(f, label, changes, position())
                 ok, why = answer[0], answer[1]
                 if not ok:
                     out(f, answer[2] if len(answer) > 2 else "skipped", why)
@@ -1230,6 +1281,8 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 if backups is not None:
                     backups.save(c.path)
                 overlay.allow(c.path)
+                original = c.path.read_bytes() if c.verify is not None \
+                    and c.path.is_file() else None
                 if c.new is None:
                     if c.path.is_dir():
                         import shutil
@@ -1242,7 +1295,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                     try:
                         c.verify(c.path)
                     except DriftDoctorError:
-                        _restore(c)
+                        _restore(c, original)
                         raise
             state.invalidate(f.model)
             state.record(f)
@@ -1292,9 +1345,13 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
     return result
 
 
-def _restore(c: FileChange) -> None:
-    """Put a file back as it was before a write whose read-back failed."""
-    if c.old is None:
+def _restore(c: FileChange, original: Optional[bytes] = None) -> None:
+    """Put a file back as it was before a write whose read-back failed:
+    the exact bytes it held (`original`, taken before the write), so its
+    byte-order mark and line endings come back too."""
+    if original is not None:
+        Path(c.path).write_bytes(original)
+    elif c.old is None:
         Path(c.path).unlink(missing_ok=True)
     elif isinstance(c.old, bytes):
         Path(c.path).write_bytes(c.old)

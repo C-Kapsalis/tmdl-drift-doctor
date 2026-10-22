@@ -38,7 +38,8 @@ class Item:
             return ""
         return "".join(difflib.unified_diff(
             self.old.splitlines(True), self.new.splitlines(True),
-            fromfile=f"a/{self.path}", tofile=f"b/{self.path}"))
+            fromfile=f"a/{te.diff_label(self.path)}",
+            tofile=f"b/{te.diff_label(self.path)}"))
 
 
 def _unqualified_refs(expr: str, name: str) -> bool:

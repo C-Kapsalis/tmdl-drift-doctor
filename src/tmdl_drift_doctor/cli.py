@@ -482,6 +482,7 @@ def remediate(fleet_path, kinds, dry_run, sync, converge, model_filter,
 def _remediate_refs(fleet_path, refs, add_missing, model_filter, dry_run,
                     assume_yes, allow_stale):
     from .interactive import ask, stdin_is_interactive
+    from . import tmdl_edit as te
     from .named import cascade_named
     fleet = _load(fleet_path)
     _fresh_baseline(fleet, allow_stale)
@@ -514,7 +515,8 @@ def _remediate_refs(fleet_path, refs, add_missing, model_filter, dry_run,
             import difflib
             click.echo("".join(difflib.unified_diff(
                 o.old.splitlines(True), o.new.splitlines(True),
-                fromfile=f"a/{o.path}", tofile=f"b/{o.path}")))
+                fromfile=f"a/{te.diff_label(o.path)}",
+                tofile=f"b/{te.diff_label(o.path)}")))
     click.echo(f"\n── summary: applied={result.count('applied')} "
                f"would-apply={result.count('would-apply')} "
                f"skipped={result.count('skipped')} "
@@ -663,9 +665,10 @@ def ratchet() -> None:
 
 def _ratchet_report(fleet, from_json, allow_stale):
     if from_json:
+        from .report_io import read_report_text
         try:
-            return json.loads(Path(from_json).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
+            return json.loads(read_report_text(from_json))
+        except (OSError, ValueError) as e:
             click.echo(f"ERROR: cannot read {from_json}: {e}", err=True)
             sys.exit(2)
     baseline = _fresh_baseline(fleet, allow_stale)

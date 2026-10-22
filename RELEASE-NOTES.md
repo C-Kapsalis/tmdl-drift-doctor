@@ -1,5 +1,53 @@
 # Release notes
 
+## Unreleased
+
+### Fixed
+
+- BUGFIX: `ratchet check`, `ratchet tighten --from-json` and `diff` read a
+  saved report in the encodings Windows writes. A report saved by Windows
+  PowerShell 5.1 (`detect --json > report.json`, UTF-16) crashed both
+  ratchet commands with a traceback and exit 1, which a CI job reads as
+  drift; one saved with `Out-File -Encoding utf8` (UTF-8 with a byte-order
+  mark) was refused with exit 2 by the ratchet and by `diff`. A report is
+  now read as UTF-8 with or without a byte-order mark, or as UTF-16 when it
+  starts with a UTF-16 byte-order mark. Bytes that are none of these are
+  refused with exit 2 and a message naming the encoding.
+  `tests/test_report_encodings.py` proves each case.
+- BUGFIX: the `freshness` body counted every retirement in force on the
+  main line ("predates 2 ledger entries") instead of the ones the branch
+  has not seen (1). It now counts the unseen ones, the same number the
+  command prints as `unseen:`. `tests/test_freshness_body.py`.
+- BUGFIX: `freshness --base-label` was shown only in the body that says
+  nothing is unseen. The body that lists retirements the branch has not
+  seen now names the base too ("This branch base (`<label>`) predates …");
+  without a label it reads as before. `tests/test_freshness_body.py`.
+- BUGFIX: `diff` accepted a file that is not a detection report (a JSON
+  object without a `models` block, or a `schema_version: 1` report) with
+  exit 0, and called every finding on the other side new or resolved
+  drift with only a scope warning. It is now refused like any unreadable
+  report: exit 2 and a message naming the file. A report with an empty
+  `models` block is still a report. `tests/test_blast_not_a_report.py`.
+- BUGFIX: a file the cascade creates follows the line endings of the file
+  it is copied from. A `table.missing` copy was always written with LF,
+  even from a CRLF template into a CRLF model, although these notes promise
+  that line endings survive a fix. The copy now takes the template file's
+  line endings (the model's `model.tmdl` decides when the template file
+  has no line break). `tests/test_created_file_line_endings.py`.
+- BUGFIX: a model file's UTF-8 byte-order mark survives every write. The
+  ordinary cascade kept it, but `remediate --ref` dropped it, and so did
+  every fixer that reads a file without its mark and writes it back
+  (`retire --drop`, the encoded mapping rows, the field-parameter row
+  writer). The restore after a failed read-back (the
+  encoded mapping rows are read back after each write) dropped it too: it
+  now puts back the exact bytes the file held before the write, mark and
+  line endings included. `tests/test_bom_preserved.py`.
+- BUGFIX: the dry-run diff headers of `remediate`, `remediate --ref` and
+  `purge` glued an absolute path to `a/` (`--- a//home/.../Visits.tmdl`).
+  A file under the working directory is now named relative to it
+  (`--- a/derived/alpha/.../Visits.tmdl`), any other without its leading
+  slash. `tests/test_diff_headers.py`.
+
 ## 1.2.1 (2026-10-22)
 
 ### Fixed
