@@ -1110,6 +1110,19 @@ def retired_targets(retire: dict) -> dict:
     return out
 
 
+def retired_tables(retire: dict) -> set:
+    """The names of every retired table.
+
+    A row that names a column of a retired table is a row that points at a
+    retired object too: the table it names is gone, so the row goes with
+    it. The table's own name is the target, with no member beside it."""
+    out = set()
+    for (kind, ref) in retire or {}:
+        if kind == "table":
+            out.add(ref.rstrip())
+    return out
+
+
 def _row_target_key(row: Row) -> Optional[tuple]:
     """The (table, member) a row points at, as the ledger spells it.
 
@@ -1129,7 +1142,8 @@ def retired_rows(files: dict, retire: dict) -> dict:
     """{table stem: [(row, category, target ref)]} of the live rows that
     point at a retired object."""
     targets = retired_targets(retire)
-    if not targets:
+    tables = retired_tables(retire)
+    if not targets and not tables:
         return {}
     measures = {member for (table, member), kind in targets.items()
                 if not table and kind == "measure"}
@@ -1142,7 +1156,7 @@ def retired_rows(files: dict, retire: dict) -> dict:
                 continue
             table, member = key
             if table:
-                if (table, member) not in targets:
+                if (table, member) not in targets and table not in tables:
                     continue
                 ref = f"{table}[{member}]"
             else:

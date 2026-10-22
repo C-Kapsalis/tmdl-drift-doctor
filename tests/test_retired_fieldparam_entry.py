@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import drift, write_fleet
+from conftest import drift, drift_json, write_fleet
 
 from tmdl_drift_doctor.baseline import capture
 from tmdl_drift_doctor.fleet import load_fleet
@@ -160,3 +160,60 @@ def test_a_live_row_is_never_removed(tmp_path):
               "--confirm-deletions", fleet=fy)
     assert r.exit_code == 0, r.output
     assert _table(derived).read_bytes() == before
+
+
+def _retire_table(fy: Path, ref: str) -> None:
+    fleet = load_fleet(fy)
+    Ledger(fleet.ledger_path).record_retirement(
+        "table", ref, reason="dropped from the template")
+
+
+TABLE_ROW = _row("Pages", "'Loans'[pages]", 1, "Reading_x")
+LIVE_ROW = _row("Loans Issued", "'Book Measures'[Loans Issued]", 2,
+                "Circulation_x")
+
+
+def _table_fleet(tmp_path: Path):
+    """A fleet whose axis table offers a column of a table that can be
+    retired, and a row that names a live measure."""
+    template = _model(tmp_path / "t" / "Library.SemanticModel",
+                      {"Loans": FACT, "Book Measures": MEASURES,
+                       "x-Selector 1": _axis("x-Selector 1",
+                                             [TABLE_ROW, LIVE_ROW])})
+    derived = _model(tmp_path / "m" / "Library.SemanticModel",
+                     {"Loans": FACT, "Book Measures": MEASURES,
+                      "x-Selector 1": _axis("x-Selector 1",
+                                            [TABLE_ROW, LIVE_ROW])})
+    fy = write_fleet(tmp_path, template, {"branch": derived},
+                     state_dir=str(tmp_path / "state"),
+                     allowlist={"kinds": ["retire.fieldparam_entry"]})
+    capture(load_fleet(fy))
+    return fy, derived
+
+
+def test_a_row_pointing_at_a_retired_table_is_removed(tmp_path):
+    """A retired table takes its axis rows with it.
+
+    The row names a column of a table the ledger records as retired. The
+    row must go with the table, exactly as a row naming a retired measure
+    goes with the measure."""
+    fy, derived = _table_fleet(tmp_path)
+    _retire_table(fy, "Loans")
+    r, data = drift_json("detect", "--kind", "retire.fieldparam_entry",
+                         fleet=fy)
+    assert r.exit_code == 1, r.output
+    detail = " ".join(
+        str(f.get("detail", ""))
+        for m in (data.get("models") or {}).values()
+        for f in (m.get("findings") or []))
+    assert "retire.fieldparam_entry" in r.output
+    assert "Loans[pages]" in detail, detail
+
+    before = _table(derived).read_text(encoding="utf-8")
+    assert LIVE_ROW in before
+    r = drift("remediate", "--kind", "retire.fieldparam_entry", "--sync",
+              "--confirm-deletions", fleet=fy)
+    assert r.exit_code == 0, r.output
+    after = _table(derived).read_text(encoding="utf-8")
+    assert TABLE_ROW not in after, "the row naming the retired table stayed"
+    assert LIVE_ROW in after, "the live row changed"
