@@ -45,6 +45,11 @@ def _forge():
     return i_filters
 
 
+def forge_installed() -> bool:
+    """Is the generator that builds the applied-filters measure available?"""
+    return _forge() is not None
+
+
 def isfiltered_refs(expression: str) -> set:
     """The (table, column) pairs the expression tests with ISFILTERED.
 

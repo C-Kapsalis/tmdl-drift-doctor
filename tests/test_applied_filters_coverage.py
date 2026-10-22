@@ -114,6 +114,16 @@ def test_the_measure_keeps_its_own_bytes_around_the_repair(fleet):
         "the repair left a bare LF in a CRLF file")
 
 
+def test_the_missing_generator_is_named(fleet, monkeypatch):
+    """Without the generator the two checks report nothing — and the run
+    says so, so a reader does not mistake it for a clean model."""
+    from conftest import drift
+    from tmdl_drift_doctor import applied_filters
+    monkeypatch.setattr(applied_filters, "_forge", lambda: None)
+    r = drift("detect", fleet=fleet.path)
+    assert "pbip-model-forge" in r.stderr, r.stderr
+
+
 def test_a_model_without_the_measure_has_no_coverage_gap(fleet):
     from tmdl_drift_doctor import tmdl_edit as te
     helpers = fleet.model_definition("north") / "tables" / "Helper Measures.tmdl"

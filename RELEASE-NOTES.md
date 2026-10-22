@@ -56,8 +56,9 @@
 
   The two generator-backed repairs need
   [pbip-model-forge](https://github.com/C-Kapsalis/pbip-model-forge)
-  installed next to drift-doctor; without it the checks report nothing and
-  the repairs refuse to run. The visibility rules need nothing else.
+  installed next to drift-doctor; without it the checks report nothing (and a
+  run says so on standard error) and the repairs refuse to run. The
+  visibility rules need nothing else.
 - **The ratchet counts by category head.** A floor is a `total` plus a count
   per head (the text before the first dot: `measure.missing` and
   `measure.expression_drift` both roll up to `measure`). What counts is every

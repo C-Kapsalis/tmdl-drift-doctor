@@ -208,6 +208,7 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv, sync,
         click.echo(buf.getvalue(), nl=False)
     else:
         _print_findings(fleet, findings, errors, model_filter, kind_filter)
+        _note_missing_forge(fleet, names)
         from .detect import divergence_report
         for name in names:
             div = divergence_report(fleet, name, baseline)
@@ -241,6 +242,27 @@ def detect(fleet_path, as_json, model_filter, kind_filter, as_csv, sync,
         sys.exit(PARSE_ERROR_EXIT)
     if any(is_gating(f, fleet) for f in findings):
         sys.exit(1)
+
+
+def _note_missing_forge(fleet, names) -> None:
+    """The applied-filters and the category-gate checks need the generator
+    that lives in pbip-model-forge. Without it they report nothing, and a
+    reader has to know why."""
+    from .applied_filters import forge_installed
+    if forge_installed():
+        return
+    for name in names:
+        tables = fleet.model_definition(name) / "tables"
+        if not tables.is_dir():
+            continue
+        if any(p.name.startswith(("y-Selector", "y-Plot Specific",
+                                  "f-Filters"))
+               for p in tables.glob("*.tmdl")):
+            click.echo("note: the applied-filters and the category-gate "
+                       "checks need pbip-model-forge installed next to "
+                       "drift-doctor; without it they report nothing",
+                       err=True)
+            return
 
 
 def _print_findings(fleet, findings, errors, model_filter, kind_filter):
