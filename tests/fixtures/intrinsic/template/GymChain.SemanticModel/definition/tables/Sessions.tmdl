@@ -1,0 +1,17 @@
+table Sessions
+	lineageTag: 10000000-0000-4000-8000-000000000004
+
+	column count
+		dataType: int64
+		lineageTag: 10000000-0000-4000-8000-000000000005
+		summarizeBy: sum
+		sourceColumn: [count]
+
+	partition Sessions = m
+		mode: import
+		queryGroup: Sessions
+		source =
+				let
+				    Source = Csv.Document(File.Contents("sessions.csv"), [Delimiter=","])
+				in
+				    Source

@@ -1,0 +1,16 @@
+table 'y-Selector 1'
+	lineageTag: 10000000-0000-4000-8000-000000000020
+
+	column 'y-Selector 1'
+		dataType: string
+		lineageTag: 10000000-0000-4000-8000-000000000021
+		summarizeBy: none
+		sourceColumn: [Value1]
+
+	partition 'y-Selector Main Plot' = calculated
+		mode: import
+		source =
+				{
+				("Plan", NAMEOF('_Members'[Plan]), 0, "Members_y", "Other"),
+				("Region", NAMEOF('_Members'[Region]), 1, "Members_y", "Other")
+				}

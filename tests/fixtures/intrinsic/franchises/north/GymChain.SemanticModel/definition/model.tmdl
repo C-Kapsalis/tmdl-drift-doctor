@@ -1,0 +1,13 @@
+model GymChain
+	culture: en-US
+	compatibilityLevel: 1500
+
+	ref table Visits
+	ref table Sessions
+	ref table '_Members'
+	ref table 'y-Selector 1'
+	ref table 'x-Selector 1'
+	ref table 'Helper Measures'
+	ref table 'f-Filters'
+	ref table '#Report Measures'
+	ref table 'z-Map Dimension-Measure Groupings'

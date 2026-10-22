@@ -77,14 +77,20 @@ REMEDIABLE_KINDS = (
     "retire.relationship",
     "retire.source_view",
     "retire.fieldparam_entry",
+    "retire.ifilter_regen",
     "purge.fieldparam_entry",
     "purge.measure",
     "purge.column",
     "purge.relationship",
     "purge.zmap_row",
     "purge.table",
+    "purge.ifilter_regen",
     "column.purge_listed",
     "fieldparam.dangling_selector",
+    "visibility.hidden_user_facing",
+    "visibility.helper_visible",
+    "ifilter.coverage_gap",
+    "ffilter.coverage_gap",
 )
 
 # Kind families whose findings carry a per-category suffix
@@ -105,13 +111,13 @@ ADVISORY_KINDS = ("extra.measure", "extra.column", "relationship.extra",
 # Kinds detection offers only in --sync mode (the purge channel).
 SYNC_ONLY_KINDS = ("purge.fieldparam_entry", "purge.measure", "purge.column",
                    "purge.relationship", "purge.zmap_row", "purge.table",
-                   "column.purge_listed")
+                   "purge.ifilter_regen", "column.purge_listed")
 
 # Deletions: only ever applied in --sync mode, only from the ledger.
 RETIREMENT_FINDING_KINDS = ("retire.table", "retire.column", "retire.measure",
                             "retire.mapping_row", "retire.mapping_category",
                             "retire.relationship", "retire.source_view",
-                            "retire.fieldparam_entry")
+                            "retire.fieldparam_entry", "retire.ifilter_regen")
 
 # Kinds that fail a gate whatever `allowlist.kinds` says: a model that lost
 # a whole axis table, or live DAX naming a retired table, is never backlog.
@@ -531,6 +537,10 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
     from .fieldparams import fieldparam_findings
     findings.extend(fieldparam_findings(name, fleet, model))
 
+    # ── model-intrinsic: the model against itself, not against the
+    #    template (visibility, the applied-filters measure, the gates) ──
+    findings.extend(_intrinsic_findings(name, fleet, model, findings, ledger))
+
     # ── count floors against the template's captured metrics ──
     from .metrics import COUNT_KIND, count_floor_findings
     for data, detail in count_floor_findings(
@@ -544,6 +554,44 @@ def detect_model(name: str, fleet: Fleet, baseline: dict,
                                 derived_value=str(data["client"]),
                                 detail=detail, data=data))
     return findings
+
+
+def _intrinsic_findings(name: str, fleet: Fleet, model: Model, found: list,
+                        ledger: Ledger) -> list:
+    """The model-intrinsic checks: a model is checked against itself, not
+    against the template.
+
+    * ``visibility.*``: a user-facing measure that is hidden, a helper that
+      is visible;
+    * ``ifilter.coverage_gap``: a visible y-Selector dimension the
+      applied-filters measure does not expose;
+    * ``ffilter.coverage_gap`` / ``ffilter.uncategorized``: a fact without a
+      category gate, a category without a gate in the all-filters measure,
+      and the facts no gate can be written for;
+    * ``retire.ifilter_regen``: the applied-filters measure references an
+      object this run removes.
+    """
+    from .applied_filters import findings as applied_filter_findings
+    from .applied_filters import measure_expression, referenced_removed
+    from .applied_filters import regen_finding
+    from .category_filters import findings as category_filter_findings
+    from .visibility import findings as visibility_findings
+    out = []
+    claimed = {f.data.get("old") for f in found if f.kind == "measure.renamed"}
+    out.extend(visibility_findings(name, fleet, model, claimed=claimed))
+    out.extend(applied_filter_findings(name, fleet, model))
+    retired = {split_ref(ref)[1] for (kind, ref)
+               in ledger.active_retirements(name) if kind == "measure"}
+    out.extend(category_filter_findings(name, fleet, model,
+                                         retired=retired))
+    _host, expression = measure_expression(model)
+    if expression:
+        out.extend(regen_finding(
+            "retire.ifilter_regen", name,
+            referenced_removed(expression, found, "retire.table",
+                               "retire.measure", "retire.column"),
+            "retires", "post-retirement"))
+    return out
 
 
 def _acknowledge_divergent(name: str, fleet: Fleet, baseline: dict,

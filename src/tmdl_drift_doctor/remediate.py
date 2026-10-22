@@ -690,6 +690,21 @@ def _apply_selector(fleet: Fleet, f: Finding) -> tuple:
     return apply_dangling(fleet, f)
 
 
+def _apply_visibility(fleet: Fleet, f: Finding) -> tuple:
+    from .visibility import apply_visibility
+    return apply_visibility(fleet, f)
+
+
+def _apply_applied_filters(fleet: Fleet, f: Finding) -> tuple:
+    from .applied_filters import apply_regeneration
+    return apply_regeneration(fleet, f)
+
+
+def _apply_category_filters(fleet: Fleet, f: Finding) -> tuple:
+    from .category_filters import apply_coverage
+    return apply_coverage(fleet, f)
+
+
 def _apply_extra_delete(fleet: Fleet, f: Finding) -> tuple:
     """Delete a model-only object the person chose to drop (interactive)."""
     derived, _ = _model_paths(fleet, f)
@@ -750,6 +765,12 @@ APPLIERS: dict = {
     "retire.measure": _apply_retire_measure,
     "retire.mapping_row": _apply_retire_mapping_row,
     "retire.stranded_ref": _apply_stranded_ref,
+    "visibility.hidden_user_facing": _apply_visibility,
+    "visibility.helper_visible": _apply_visibility,
+    "ifilter.coverage_gap": _apply_applied_filters,
+    "retire.ifilter_regen": _apply_applied_filters,
+    "purge.ifilter_regen": _apply_applied_filters,
+    "ffilter.coverage_gap": _apply_category_filters,
 }
 
 
@@ -916,16 +937,21 @@ def _pre_relationship_endpoints(state: RunState, f: Finding) -> Optional[str]:
 
 
 def _pre_retirement(state: RunState, f: Finding) -> Optional[str]:
-    """Re-check, on the model as it is NOW, that nothing still depends on the
-    object: template-owned dependents must have been fixed (or be fixed
-    earlier in this run), ledger-retired ones removed."""
+    """Re-check, on the model as it is NOW, that nothing still depends on
+    the object: template-owned dependents must have been fixed (or be fixed
+    earlier in this run), ledger-retired ones removed.
+
+    The applied-filters measures never block: they are rebuilt from what
+    the model offers after the removal, so a branch that names the removed
+    object is repaired, not a reason to refuse."""
     target_kind = f.kind.split(".", 1)[1]
     deps = dependents(state.model(f.model), target_kind, f.ref)
     sweep = set(f.data.get("sweep_relationships") or ())
     left = [ref for kind, ref in deps["definitions"]
             if (kind, ref) not in state.removed
             and ("table", split_ref(ref)[0]) not in state.removed
-            and ref not in state.overwritten]
+            and ref not in state.overwritten
+            and not _is_applied_filters(ref)]
     left += [sig for sig in deps["relationships"]
              if sig not in sweep and ("relationship", sig) not in state.removed]
     left += deps["sort_by"] + deps["hierarchies"]
@@ -934,6 +960,11 @@ def _pre_retirement(state: RunState, f: Finding) -> Optional[str]:
                 + "; their own fixes must land first (cascade them, then "
                   "re-run, or use --converge)")
     return None
+
+
+def _is_applied_filters(ref: str) -> bool:
+    """Is the reference one of the applied-filters measures?"""
+    return split_ref(ref)[1].startswith("i-Applied")
 
 
 PRECONDITIONS: dict = {
@@ -960,6 +991,7 @@ PHASES = (
     "retire.column", "retire.table",
     "purge.fieldparam_entry", "purge.measure", "purge.column",
     "purge.relationship", "purge.zmap_row", "purge.table",
+    "retire.fieldparam_entry", "purge.ifilter_regen", "retire.ifilter_regen",
 )
 
 
@@ -1306,7 +1338,8 @@ class Backups:
 # (a reference rewrite, a removal, a move between hosts).
 OVERLAY_WRITERS = ("measure.renamed", "measure.wrong_host", "retire",
                    "purge", "category_group", "fieldparam.dangling_row",
-                   "selector.dangling_branch")
+                   "selector.dangling_branch", "visibility", "ifilter",
+                   "ffilter")
 
 
 class OverlayWatch:

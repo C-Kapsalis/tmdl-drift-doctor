@@ -1,0 +1,10 @@
+version: 1
+template: template/GymChain.SemanticModel
+models:
+  north: franchises/north/GymChain.SemanticModel
+state_dir: .drift-doctor
+allowlist:
+  kinds:
+    - visibility
+    - ifilter
+    - ffilter.coverage_gap

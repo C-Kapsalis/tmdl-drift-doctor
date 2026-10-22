@@ -1,0 +1,18 @@
+table 'z-Map Dimension-Measure Groupings'
+	lineageTag: 10000000-0000-4000-8000-000000000070
+
+	column z
+		dataType: string
+		isHidden
+		lineageTag: 10000000-0000-4000-8000-000000000071
+		summarizeBy: none
+		sourceColumn: [z]
+
+	partition 'z-Map Dimension-Measure Groupings' = m
+		mode: import
+		queryGroup: z-Map
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Compress(Binary.FromText("i45WCsssziwpVtJBZ8RXKMXGAgA="), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [z = _t])
+				in
+				    Source

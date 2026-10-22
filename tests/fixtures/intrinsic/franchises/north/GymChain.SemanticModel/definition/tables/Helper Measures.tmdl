@@ -1,0 +1,16 @@
+table 'Helper Measures'
+	lineageTag: 10000000-0000-4000-8000-000000000040
+
+	measure 'i-Applied Filters' =
+			IF(
+			    ISFILTERED('_Members'[Plan]),
+			    "Plan" & " = " & "Basic" & UNICHAR(13) & UNICHAR(10)
+			)
+		lineageTag: 10000000-0000-4000-8000-000000000041
+
+	measure 'i-Visit Amount' = SUM(Visits[amount])
+		lineageTag: 10000000-0000-4000-8000-000000000042
+
+	measure 'i-Session Total' = SUM(Sessions[count])
+		isHidden
+		lineageTag: 10000000-0000-4000-8000-000000000043
