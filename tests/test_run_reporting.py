@@ -194,7 +194,7 @@ def test_the_release_notes_record_the_three_checks_instead_of_the_gaps():
     text = notes.read_text(encoding="utf-8")
     assert "### Known gaps" not in text, (
         "RELEASE-NOTES.md still carries a '### Known gaps' block")
-    unreleased = text.split("## Unreleased", 1)[1].split("\n## ", 1)[0]
+    unreleased = text.split("## 1.2.0", 1)[1].split("\n## ", 1)[0]
     added = unreleased.split("### Added", 1)[1].split("\n### ", 1)[0]
     for needle in ("applied-filters", "f-filter", "visibility"):
         assert needle in added, (
