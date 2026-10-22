@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tmdl-drift-doctor"
-version = "1.2.0"
+version = "1.2.1"
 description = "Drift detection and auto-remediation for fleets of TMDL-format Power BI semantic models derived from a shared template."
 readme = "README.md"
 license = { file = "LICENSE" }

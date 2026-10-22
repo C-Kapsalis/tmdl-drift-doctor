@@ -1,6 +1,6 @@
 # Release notes
 
-## Fixes after v1.2.0 (unreleased)
+## 1.2.1 (2026-10-22)
 
 ### Fixed
 
@@ -22,7 +22,7 @@
   - After a failed read-back, the restored file on Windows got `\r\r\n`
     line endings. It now gets back its exact text.
 
-## Unreleased
+## 1.2.0 (2026-10-22)
 
 ### Added
 
