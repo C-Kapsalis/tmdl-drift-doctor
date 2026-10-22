@@ -77,6 +77,35 @@ def test_a_gate_the_ledger_retired_is_not_offered_again(fleet):
         "retirement")
 
 
+def test_the_repair_never_writes_a_gate_the_ledger_retired(fleet):
+    """A gate the ledger retired is not written back, and the line that
+    tested it goes with it."""
+    from tmdl_drift_doctor import mapping_codec as mc
+    from tmdl_drift_doctor import tmdl_edit as te
+    from tmdl_drift_doctor.ledger import Ledger
+    from tmdl_drift_doctor.remediate import remediate
+    Ledger(fleet.ledger_path).record_retirement(
+        "measure", "f-Filters[f-Visits]", reason="dropped from the template")
+    table = fleet.model_definition("north") / "tables" / \
+        "z-Map Dimension-Measure Groupings.tmdl"
+    text = te.read_text(table)
+    table.write_text(mc.replace_rows(
+        text, [["Visits", "Visits", "Visits_x"],
+                ["Sessions", "Sessions", "Sessions_x"]]), encoding="utf-8")
+    found = findings(fleet)
+    assert found, "the second category still needs a gate"
+    assert "create f-Sessions" in found[0].detail
+    gates = fleet.model_definition("north") / "tables" / "f-Filters.tmdl"
+    res = remediate(fleet, found, confirm=yes)
+    assert res.count("applied") == 1
+    after = gates.read_text(encoding="utf-8")
+    assert "measure 'f-Sessions'" in after
+    assert "measure 'f-Visits'" not in after, (
+        "a gate the ledger retired was written back")
+    assert "[f-Visits]" not in after, (
+        "the all-filters measure still tests a gate that no longer exists")
+
+
 def test_the_uncategorized_finding_is_report_only(fleet):
     from tmdl_drift_doctor.detect import is_remediable
     found = findings(fleet, "ffilter.uncategorized")
