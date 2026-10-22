@@ -31,6 +31,13 @@ def test_the_body_counts_only_the_unseen_entries(tmp_path):
     assert "predates **1 ledger entry**" in res["body"], res["body"]
 
 
+def test_the_at_risk_body_names_the_base_label(tmp_path):
+    fleet, base, head = _two_head_one_unseen(tmp_path)
+    res = run(fleet, base, head, base_label="abc123")
+    assert res["at_risk"]
+    assert "`abc123`" in res["body"], res["body"]
+
+
 def test_without_a_label_the_at_risk_body_is_unchanged(tmp_path):
     fleet, base, head = _two_head_one_unseen(tmp_path)
     res = run(fleet, base, head)

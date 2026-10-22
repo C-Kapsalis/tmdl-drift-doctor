@@ -18,6 +18,10 @@
   main line ("predates 2 ledger entries") instead of the ones the branch
   has not seen (1). It now counts the unseen ones, the same number the
   command prints as `unseen:`. `tests/test_freshness_body.py`.
+- BUGFIX: `freshness --base-label` was shown only in the body that says
+  nothing is unseen. The body that lists retirements the branch has not
+  seen now names the base too ("This branch base (`<label>`) predates …");
+  without a label it reads as before. `tests/test_freshness_body.py`.
 
 ## 1.2.1 (2026-10-22)
 

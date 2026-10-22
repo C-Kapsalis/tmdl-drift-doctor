@@ -223,7 +223,8 @@ def render(base: dict, head: dict, unseen_pairs, at, unchecked, *,
         return "\n".join(lines)
 
     n = len(unseen_pairs)
-    lines += [f"This branch base predates **{n} ledger entr"
+    base = f" (`{base_label}`)" if base_label else ""
+    lines += [f"This branch base{base} predates **{n} ledger entr"
               f"{'y' if n == 1 else 'ies'}** on the main line.", ""]
     if at:
         lines += ["| Object | Kind | Models |", "|---|---|---|"]
