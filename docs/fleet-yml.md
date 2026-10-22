@@ -37,6 +37,7 @@ first and exits 2 listing every problem; nothing is half-loaded.
 | `bookmarks` | `{group_column, exempt_display_names}` | `Analysis Category`, `++new report` | Which bookmark filters pin a group. |
 | `measure_liveness` | `{helper_prefixes, diagnostic_prefixes, always_live}` | `- _ !`, `i-`, `[]` | Which measures of a dropped group's component stay (user-facing, diagnostic, listed, bound in a report). |
 | `column_purge` | `{names, exceptions}` | empty | Model-only columns on shared tables with these names are removed in a sync run (`column.purge_listed`), except the listed `Table[column]` pairs. |
+| `visibility` | `{helper_prefixes, always_visible}` | the built-in name test; the built-in infrastructure set | The visibility rules. `helper_prefixes` replaces the built-in test that decides whether a measure name is a helper's; `always_visible` adds names to the set of helper-named measures that stay visible (`f-All`, `f-Slicer`, the `i-` set). |
 | `selector_branch.helper_file` | file name | `Helper Measures.tmdl` | The table file `add-branch` edits. |
 | `grouping.descriptions` | mapping `Group_Name` -> text | `{}` | Descriptions `groups annotate` writes for new group annotations. |
 | `renames.measures` | mapping old -> new | `{}` | Reviewed measure renames for `renames apply` / `renames check`. An empty value is a to-do and is skipped. |

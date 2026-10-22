@@ -213,6 +213,10 @@ ledger. A retirement that derived work still depends on is refused: retire
 | `relationship.extra` | Derived-only relationship between two shared tables | Nothing: advisory | never remediated |
 | `extra.measure` / `extra.column` | Derived-only object on a shared table | Nothing: advisory, never auto-deleted | never remediated |
 | `retire.table` / `retire.column` / `retire.measure` / `retire.mapping_row` / `retire.relationship` | Object retired from the template (ledger-proven), still carried by a derived model | Remove the block / file / row; a table or column takes its template-owned or ledger-retired relationships with it | allowlist **+ `--sync`**, refused (`blocked`) while derived work depends on it |
+| `visibility.hidden_user_facing` / `visibility.helper_visible` | A user-facing-named measure that is hidden, or a helper-named measure that is visible and is not on the always-visible allowlist (the class of a measure is decided by its name alone) | Remove the hidden flag / add it; the file keeps its line endings and its byte-order mark | allowlist, never batch-safe |
+| `ifilter.coverage_gap` | A dimension the model offers in a y-Selector table that the `i-Applied Filters` measure does not expose | Regenerate the measure from the visible dimension set (needs pbip-model-forge) | allowlist, never batch-safe |
+| `retire.ifilter_regen` / `purge.ifilter_regen` | The `i-Applied Filters` measure names an object this run removes, so it keeps a stale branch | Regenerate the measure after the removal (needs pbip-model-forge) | allowlist **+ `--sync`**, never batch-safe |
+| `ffilter.coverage_gap` / `ffilter.uncategorized` | A fact a user-facing measure reads with no category gate, a category with no gate in `f-All`, a fact no category can be found for | Add the missing measures and gate lines (needs pbip-model-forge); the uncategorized fact is report-only | allowlist, never batch-safe |
 
 Derived-only tables and mapping rows are not findings at all; extending the
 template is legitimate. Measure names are model-global, so `measure.missing`
@@ -383,7 +387,9 @@ a team adopts whichever ones it needs, not all of them.
 - [`tmdl-preflight`](https://github.com/C-Kapsalis/tmdl-preflight): a linter
   and auto-fixer for a single TMDL-format model.
 - [`pbip-model-forge`](https://github.com/C-Kapsalis/pbip-model-forge):
-  builds a sample Power BI model from a plain-language description.
+  builds a sample Power BI model from a plain-language description. Its
+  generators also back the applied-filters and the category-gate repairs
+  here: install it next to drift-doctor and those two repairs run.
 - [`pbi-plot-styler`](https://github.com/C-Kapsalis/pbi-plot-styler): keeps
   report visuals on-brand as measures are added.
 - [`BI-report-template-site`](https://github.com/C-Kapsalis/BI-report-template-site):

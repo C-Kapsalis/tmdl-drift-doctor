@@ -185,15 +185,17 @@ def test_an_interrupted_run_says_so_and_exits_130(tmp_path, monkeypatch):
     assert "re-run to resume from the remaining items" in r.stderr, r.stderr
 
 
-# ── DC-12: the known gaps are written down ────────────────────────────────
+# ── DC-12: the known gaps are closed and written down ──────────────────────
 
-def test_the_release_notes_record_the_known_gaps():
-    """DC-12: a user can read the gaps from the release notes."""
+def test_the_release_notes_record_the_three_checks_instead_of_the_gaps():
+    """DC-12: the three checks that used to be a known gap are part of the
+    tool now, and the release notes say so."""
     notes = Path(__file__).parent.parent / "RELEASE-NOTES.md"
     text = notes.read_text(encoding="utf-8")
-    assert "### Known gaps" in text, (
-        "RELEASE-NOTES.md has no '### Known gaps' block")
-    block = text.split("### Known gaps", 1)[1]
+    assert "### Known gaps" not in text, (
+        "RELEASE-NOTES.md still carries a '### Known gaps' block")
+    unreleased = text.split("## Unreleased", 1)[1].split("\n## ", 1)[0]
+    added = unreleased.split("### Added", 1)[1].split("\n### ", 1)[0]
     for needle in ("applied-filters", "f-filter", "visibility"):
-        assert needle in block, (
-            f"the known-gaps block does not name the {needle} check")
+        assert needle in added, (
+            f"the release notes do not name the {needle} check")
