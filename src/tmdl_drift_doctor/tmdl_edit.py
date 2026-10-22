@@ -574,12 +574,12 @@ def deregister_table(model_content: str, table_name: str) -> str:
              "ref table '" + table_name.replace("'", "''") + "'"}
     out = model_content
     for ref_stmt in forms:
-        pattern = re.compile(rf"^{re.escape(ref_stmt)}[ \t]*\n?", re.MULTILINE)
+        pattern = re.compile(rf"^{re.escape(ref_stmt)}[ \t]*\r?\n?", re.MULTILINE)
         out = pattern.sub("", out)
     return deregister_query_order(out, table_name)
 
 
-_QUERY_ORDER = re.compile(r"^(annotation PBI_QueryOrder\s*=\s*)(\[.*\])[ \t]*$",
+_QUERY_ORDER = re.compile(r"^(annotation PBI_QueryOrder\s*=\s*)(\[.*\])[ \t]*\r?$",
                           re.MULTILINE)
 
 

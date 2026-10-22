@@ -63,8 +63,14 @@ def _norm_body(body: list) -> str:
     return "\n".join(ln.strip() for ln in body).strip()
 
 
+def _lines(text: str) -> list:
+    """The lines of a table file, whatever its line endings (a model
+    committed from Windows has CRLF)."""
+    return text.replace("\r\n", "\n").split("\n")
+
+
 def parse_policy(text: str) -> Optional[Policy]:
-    lines = text.split("\n")
+    lines = _lines(text)
     starts = [i for i, ln in enumerate(lines) if ln.strip() == "refreshPolicy"]
     if not starts:
         return None
@@ -104,7 +110,7 @@ class PartitionInfo:
 
 
 def partitions(text: str) -> list:
-    lines = text.split("\n")
+    lines = _lines(text)
     out = []
     for i, ln in enumerate(lines):
         m = re.match(r"^\tpartition\s+(.+?)\s*=\s*(\w+)\s*$", ln)
@@ -151,7 +157,7 @@ def problems(text: str, pol: Policy) -> list:
     out = []
     if pol.count > 1:
         out.append(f"{pol.count} refreshPolicy blocks")
-    lines = text.split("\n")
+    lines = _lines(text)
     if lines[pol.start] != "\trefreshPolicy":
         out.append("the refreshPolicy block is not at table level")
     for key in ("rollingWindowGranularity", "incrementalGranularity"):

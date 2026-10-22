@@ -1299,7 +1299,7 @@ def _restore(c: FileChange) -> None:
     elif isinstance(c.old, bytes):
         Path(c.path).write_bytes(c.old)
     else:
-        Path(c.path).write_text(c.old, encoding="utf-8")
+        Path(c.path).write_bytes(c.old.encode("utf-8"))
 
 
 class Backups:

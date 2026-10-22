@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Test fixtures are compared byte for byte (the tests add CRLF themselves)
+tests/fixtures/** -text

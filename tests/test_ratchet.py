@@ -86,7 +86,8 @@ def test_resurrection_is_hard_zero(fleet_dir):
 def test_refuses_filtered_scoped_or_errored_reports(fleet_dir):
     _seeded(fleet_dir)
     out = fleet_dir / "scoped.json"
-    out.write_text(_cli(fleet_dir, "detect", "--json", "--model", "alpha").output)
+    out.write_text(_cli(fleet_dir, "detect", "--json", "--model", "alpha").output,
+                   encoding="utf-8")
     assert _cli(fleet_dir, "ratchet", "check", "--from-json", str(out)).exit_code == 0
     # a scoped report may lower its own model's floor, never prune
     r = _cli(fleet_dir, "ratchet", "tighten", "--from-json", str(out))
@@ -95,13 +96,14 @@ def test_refuses_filtered_scoped_or_errored_reports(fleet_dir):
              "--prune")
     assert r.exit_code == 2 and "--prune requires a FLEET dump" in r.output
 
-    out.write_text(_cli(fleet_dir, "detect", "--json", "--kind", "measure.").output)
+    out.write_text(_cli(fleet_dir, "detect", "--json", "--kind", "measure.").output,
+                   encoding="utf-8")
     r = _cli(fleet_dir, "ratchet", "check", "--from-json", str(out))
     assert r.exit_code == 2 and "category-filtered" in r.output
 
     report = json.loads(_cli(fleet_dir, "detect", "--json").output)
     report["errors"] = [{"model": "bravo", "error": "boom"}]
-    out.write_text(json.dumps(report))
+    out.write_text(json.dumps(report), encoding="utf-8")
     r = _cli(fleet_dir, "ratchet", "tighten", "--from-json", str(out))
     assert r.exit_code == 2 and "provider error" in r.output
 
@@ -125,7 +127,7 @@ def test_new_model_needs_allow_new_and_prune_drops_old(fleet_dir):
     path = fleet_dir / ".drift-doctor" / "floors.json"
     doc = _floors(fleet_dir)
     doc["models"]["charlie"] = doc["models"].pop("bravo")
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps(doc), encoding="utf-8")
     r = _cli(fleet_dir, "ratchet", "check")
     assert r.exit_code == 1 and "bravo: no floor recorded" in r.output
     _cli(fleet_dir, "ratchet", "tighten")
