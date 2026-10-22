@@ -1122,7 +1122,36 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
     for model in dict.fromkeys(f.model for f in admitted):
         overlay._scan(model)
     backups = Backups() if backup and not dry_run else None
-    for position, f in enumerate(admitted, 1):
+
+    def asked(f) -> bool:
+        """Can this finding reach a question? The gates below that do not
+        depend on the run so far, in the same order: a `[manual]` item, an
+        advisory, an overridden or a gated-out finding is never asked, so
+        it is not counted in the walk's `[n/total]`."""
+        if f.overridden:
+            return False
+        if f.advisory:
+            return bool(offer_extra_delete and confirm is not None
+                        and not batch_only
+                        and _extra_deletable(fleet, state, f))
+        if applier_for(f.kind) is None or not fleet.allows(f.kind):
+            return False
+        if (f.kind in RETIREMENT_FINDING_KINDS or _sync_only(f.kind)) \
+                and not sync:
+            return False
+        if f.blocked or (is_destructive(f.kind) and not allow_destructive):
+            return False
+        return not (batch_only and not is_batch_safe(f.kind))
+
+    questions = sum(1 for f in admitted if asked(f)) \
+        if confirm is not None else 0
+    counter = [0]
+
+    def position():
+        counter[0] += 1
+        return (counter[0], max(questions, counter[0]))
+
+    for f in admitted:
         if f.overridden:
             o = f.override
             out(f, "overridden",
@@ -1147,7 +1176,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
             refs = _report_refs(fleet, f)
             label += (f" ({refs} report ref(s) will break)"
                       if refs else "")
-            answer = confirm(f, label, changes, (position, len(admitted)))
+            answer = confirm(f, label, changes, position())
             if not answer[0]:
                 out(f, answer[2] if len(answer) > 2 else "skipped", answer[1])
                 continue
@@ -1243,7 +1272,7 @@ def remediate(fleet: Fleet, findings: list, *, kind=None,
                 out(f, "would-apply", label, changes)
                 continue
             if confirm is not None:
-                answer = confirm(f, label, changes, (position, len(admitted)))
+                answer = confirm(f, label, changes, position())
                 ok, why = answer[0], answer[1]
                 if not ok:
                     out(f, answer[2] if len(answer) > 2 else "skipped", why)
