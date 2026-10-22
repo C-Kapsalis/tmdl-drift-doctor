@@ -222,7 +222,7 @@ def render(base: dict, head: dict, unseen_pairs, at, unchecked, *,
                   f"retired that this branch has not seen.", ""]
         return "\n".join(lines)
 
-    n = len(head)
+    n = len(unseen_pairs)
     lines += [f"This branch base predates **{n} ledger entr"
               f"{'y' if n == 1 else 'ies'}** on the main line.", ""]
     if at:

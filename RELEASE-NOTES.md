@@ -14,6 +14,10 @@
   starts with a UTF-16 byte-order mark. Bytes that are none of these are
   refused with exit 2 and a message naming the encoding.
   `tests/test_report_encodings.py` proves each case.
+- BUGFIX: the `freshness` body counted every retirement in force on the
+  main line ("predates 2 ledger entries") instead of the ones the branch
+  has not seen (1). It now counts the unseen ones, the same number the
+  command prints as `unseen:`. `tests/test_freshness_body.py`.
 
 ## 1.2.1 (2026-10-22)
 
