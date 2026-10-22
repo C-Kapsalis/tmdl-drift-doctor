@@ -42,6 +42,11 @@
   encoded mapping rows are read back after each write) dropped it too: it
   now puts back the exact bytes the file held before the write, mark and
   line endings included. `tests/test_bom_preserved.py`.
+- BUGFIX: the dry-run diff headers of `remediate`, `remediate --ref` and
+  `purge` glued an absolute path to `a/` (`--- a//home/.../Visits.tmdl`).
+  A file under the working directory is now named relative to it
+  (`--- a/derived/alpha/.../Visits.tmdl`), any other without its leading
+  slash. `tests/test_diff_headers.py`.
 
 ## 1.2.1 (2026-10-22)
 

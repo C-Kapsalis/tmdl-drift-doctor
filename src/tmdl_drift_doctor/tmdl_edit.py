@@ -86,6 +86,20 @@ def write_text(path, text: str, eol: str = "\n",
     Path(path).write_bytes(encode(text, eol, bom))
 
 
+def diff_label(path) -> str:
+    """How a unified diff header names a file after its ``a/`` or ``b/``:
+    the path relative to the working directory when it is under it, else
+    the path without a leading slash (``a//home/...`` is not a path)."""
+    p = Path(path)
+    cwd = Path.cwd()
+    for one, base in ((p, cwd), (p.resolve(), cwd.resolve())):
+        try:
+            return one.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return p.as_posix().lstrip("/")
+
+
 def encode(text: str, eol: str, bom: bool = False) -> bytes:
     """The bytes of a file holding `text`: the byte-order mark (when the file
     had one), the text with `eol` line endings, UTF-8. A file written from

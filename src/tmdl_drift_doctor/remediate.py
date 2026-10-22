@@ -63,7 +63,7 @@ class FileChange:
     def diff(self) -> str:
         a = _as_text(self.old).splitlines(keepends=True)
         b = _as_text(self.new).splitlines(keepends=True)
-        label = str(self.path)
+        label = te.diff_label(self.path)
         return "".join(difflib.unified_diff(
             a, b, fromfile=f"a/{label}", tofile=f"b/{label}"))
 
