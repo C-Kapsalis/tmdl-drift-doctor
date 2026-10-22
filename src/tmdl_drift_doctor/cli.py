@@ -663,9 +663,10 @@ def ratchet() -> None:
 
 def _ratchet_report(fleet, from_json, allow_stale):
     if from_json:
+        from .report_io import read_report_text
         try:
-            return json.loads(Path(from_json).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
+            return json.loads(read_report_text(from_json))
+        except (OSError, ValueError) as e:
             click.echo(f"ERROR: cannot read {from_json}: {e}", err=True)
             sys.exit(2)
     baseline = _fresh_baseline(fleet, allow_stale)

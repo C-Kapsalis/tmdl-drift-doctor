@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import StaleBaselineError
+from .report_io import read_report_text
 
 MARKER = "<!-- drift-doctor:blast-radius -->"
 HEADING = "## Blast radius of this change"
@@ -31,7 +32,7 @@ class DiffError(Exception):
 def _load(path) -> dict:
     p = Path(path)
     try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc = json.loads(read_report_text(p))
     except FileNotFoundError as exc:
         raise DiffError(f"no report at {p}") from exc
     except (OSError, ValueError) as exc:

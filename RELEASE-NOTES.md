@@ -1,5 +1,20 @@
 # Release notes
 
+## Unreleased
+
+### Fixed
+
+- BUGFIX: `ratchet check`, `ratchet tighten --from-json` and `diff` read a
+  saved report in the encodings Windows writes. A report saved by Windows
+  PowerShell 5.1 (`detect --json > report.json`, UTF-16) crashed both
+  ratchet commands with a traceback and exit 1, which a CI job reads as
+  drift; one saved with `Out-File -Encoding utf8` (UTF-8 with a byte-order
+  mark) was refused with exit 2 by the ratchet and by `diff`. A report is
+  now read as UTF-8 with or without a byte-order mark, or as UTF-16 when it
+  starts with a UTF-16 byte-order mark. Bytes that are none of these are
+  refused with exit 2 and a message naming the encoding.
+  `tests/test_report_encodings.py` proves each case.
+
 ## 1.2.1 (2026-10-22)
 
 ### Fixed
